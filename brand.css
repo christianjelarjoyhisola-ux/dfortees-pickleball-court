@@ -397,6 +397,7 @@ body[data-theme="dark"] {
 }
 
 .welcome-book-cta {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
@@ -410,9 +411,22 @@ body[data-theme="dark"] {
   box-shadow: 0 18px 46px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.11);
   color: #fff;
   text-align: left;
+  overflow: hidden;
   backdrop-filter: blur(14px) saturate(1.18);
   cursor: pointer;
+  animation: welcomeCtaPulse 3.2s ease-in-out infinite;
   transition: transform .2s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+
+.welcome-book-cta::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(110deg, transparent 24%, rgba(255,255,255,.17) 46%, transparent 68%);
+  pointer-events: none;
+  transform: translateX(-135%);
+  animation: welcomeCtaShine 3.8s ease-in-out infinite;
 }
 
 .welcome-book-cta:hover,
@@ -423,6 +437,7 @@ body[data-theme="dark"] {
   transform: translateY(-2px);
 }
 
+.welcome-book-cta > span { position: relative; z-index: 1; }
 .welcome-book-cta > span:first-child { display: grid; gap: 3px; }
 .welcome-book-cta strong {
   color: #f7e46e;
@@ -444,6 +459,22 @@ body[data-theme="dark"] {
   color: #092116;
   font-size: 1.35rem;
   font-weight: 900;
+  animation: welcomeArrowNudge 1.8s ease-in-out infinite;
+}
+
+@keyframes welcomeCtaPulse {
+  0%, 100% { box-shadow: 0 18px 46px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.11); }
+  50% { box-shadow: 0 20px 52px rgba(0,0,0,.34), 0 0 0 4px rgba(242,214,75,.08), inset 0 1px 0 rgba(255,255,255,.14); }
+}
+
+@keyframes welcomeCtaShine {
+  0%, 56% { transform: translateX(-135%); }
+  78%, 100% { transform: translateX(135%); }
+}
+
+@keyframes welcomeArrowNudge {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(3px); }
 }
 
 .welcome-footer {
@@ -985,6 +1016,10 @@ textarea:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .welcome-book-cta,
+  .welcome-book-cta::before,
+  .welcome-cta-arrow { animation: none !important; }
+
   *, *::before, *::after {
     scroll-behavior: auto !important;
     animation-duration: .01ms !important;
