@@ -15,6 +15,7 @@ const publicFiles = [
   "host.html",
   "index.html",
   "login.html",
+  "logodfortees.jpg",
   "supabase-config.js",
   "supabase.min.js",
 ];
