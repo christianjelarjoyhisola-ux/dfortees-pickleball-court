@@ -1,0 +1,34 @@
+# Secret / API key files
+*.txt
+!ads.txt
+resendAPIKEY.txt
+.env
+.env.local
+.env*.local
+
+# Supabase local temp files
+supabase/.temp/
+
+# Dependencies
+node_modules/
+
+# Claude workspace
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+.vercel
+.cf-pages-deploy/
+.generated/
+.wrangler/
+.wrangler-login*.txt
+test-results/
+
+# Read-only Korte source snapshot (never commit or deploy)
+korte-inspection/
+korte-source.zip
+
+# Local generated deployment bundle
+.cf-pages-deploy/

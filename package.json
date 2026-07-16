@@ -1,0 +1,19 @@
+{
+  "name": "dfortees",
+  "version": "1.0.0",
+  "private": true,
+  "description": "D'fortees Pickleball Court booking, host, and administration system",
+  "scripts": {
+    "dev": "node tools/local-server.js",
+    "test": "node --test booking-balance.test.js",
+    "check": "node --check booking-balance.js && node --check brand-config.js && node --check supabase-config.js && node --check _worker.js && node --check create-accounts.js && node --check setup-db.js",
+    "verify": "powershell -ExecutionPolicy Bypass -File tools/verify-project.ps1"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.1",
+    "pg": "^8.21.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.100.0"
+  }
+}
