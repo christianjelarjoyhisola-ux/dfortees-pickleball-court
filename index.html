@@ -6,7 +6,7 @@
 <title>D’fortees Pickleball Court — Book Your Court</title>
 <script src="booking-balance.js?v=20260716-host-balance-v1"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="brand.css?v=20260716" />
+<link rel="stylesheet" href="brand.css?v=20260716-2" />
 <script src="brand-config.js" defer></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -2686,77 +2686,41 @@ body.host-mode .courts { padding-bottom:140px; }
 
 <!-- SPLASH SCREEN -->
 <div id="splashScreen" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
-  <div class="welcome-shell">
-    <div class="welcome-brand" aria-label="D’fortees Pickleball Court">
-      <span class="brand-mark" aria-hidden="true">D'F</span>
-      <span>
-        <strong data-brand-name>D’fortees Pickleball Court</strong>
-        <small data-brand-address>Prk-4 National Highway, 8801 Montevista</small>
-      </span>
-    </div>
-
-    <section class="booking-hero welcome-hero">
-      <div class="booking-hero-inner">
-        <div>
-          <div class="booking-hero-eyebrow">Live court availability · Fast confirmation</div>
-          <h1 id="welcomeTitle">Your next great game <span>starts here.</span></h1>
-          <p class="booking-hero-copy">Choose a court, see open times, and secure your schedule in a few simple steps. Built for quick mobile booking from warm-up to match point.</p>
-          <div class="booking-hero-actions">
-            <button class="hero-primary" type="button" onclick="enterBooking('courts')">View available courts</button>
-          </div>
-        </div>
-        <div class="booking-hero-proof" aria-label="Booking benefits">
-          <div class="hero-proof-item">
-            <span class="hero-proof-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <rect x="3" y="5" width="18" height="16" rx="3"></rect>
-                <path d="M8 3v4M16 3v4M3 10h18"></path>
-                <path d="M8 14h3M8 17h6"></path>
-              </svg>
-            </span>
-            <div><strong>Real-time schedule</strong><span>See availability before selecting.</span></div>
-          </div>
-          <div class="hero-proof-item">
-            <span class="hero-proof-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="M20.5 13.5 13.5 20.5a2.1 2.1 0 0 1-3 0l-7-7A2 2 0 0 1 3 12.1V5a2 2 0 0 1 2-2h7.1a2 2 0 0 1 1.4.6l7 7a2.1 2.1 0 0 1 0 2.9Z"></path>
-                <circle cx="8" cy="8" r="1.25"></circle>
-              </svg>
-            </span>
-            <div><strong>Clear pricing</strong><span>Review totals before payment.</span></div>
-          </div>
-          <div class="hero-proof-item">
-            <span class="hero-proof-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="9"></circle>
-                <path d="m8 12 2.7 2.7L16.5 9"></path>
-              </svg>
-            </span>
-            <div><strong>Easy confirmation</strong><span>Keep one reference for your booking.</span></div>
-          </div>
-        </div>
+  <div class="welcome-stage">
+    <header class="welcome-identity" aria-label="D’fortees Pickleball Court">
+      <div class="welcome-emblem" aria-hidden="true">
+        <span class="brand-mark brand-mark-xl">D'F</span>
       </div>
-      <nav class="welcome-contact-bar" aria-label="Contact D’fortees Pickleball Court">
-        <div class="welcome-contact-links">
-          <a class="welcome-contact-link" href="https://www.facebook.com/Dfortees" target="_blank" rel="noopener noreferrer" aria-label="Visit D’fortees on Facebook">
-            <span class="welcome-contact-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="M14 8h3V4.5c-.6-.1-1.8-.2-3.2-.2-3.1 0-5.2 1.9-5.2 5.4V12H5v4h3.6v8h4.4v-8h3.5l.6-4H13V10c0-1.2.3-2 1-2Z"></path>
-              </svg>
-            </span>
-            <span><strong>Facebook</strong><small>@Dfortees</small></span>
-          </a>
-          <a class="welcome-contact-link welcome-contact-link--call" href="tel:+639232579854" aria-label="Call D’fortees at 0923 257 9854">
-            <span class="welcome-contact-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="M7.1 3.5 9.5 7a2 2 0 0 1-.2 2.5l-1.1 1.1a15.5 15.5 0 0 0 5.2 5.2l1.1-1.1a2 2 0 0 1 2.5-.2l3.5 2.4a2 2 0 0 1 .8 2.2l-.5 1.8a2 2 0 0 1-2 1.5C9.3 21.8 2.2 14.7 1.6 5.2a2 2 0 0 1 1.5-2l1.8-.5a2 2 0 0 1 2.2.8Z"></path>
-              </svg>
-            </span>
-            <span><strong>Call us</strong><small>0923 257 9854</small></span>
-          </a>
-        </div>
+      <p class="welcome-kicker"><span data-brand-name>D’fortees Pickleball Court</span> · Montevista</p>
+    </header>
+
+    <main class="welcome-message">
+      <h1 id="welcomeTitle">Play bold.<span>Book easy.</span></h1>
+      <p>Your neighborhood pickleball court for quick games, great rallies, and easy scheduling.</p>
+      <span class="welcome-rally-line" aria-hidden="true"></span>
+      <button class="welcome-book-cta" type="button" onclick="enterBooking('courts')">
+        <span><strong>Tap to book</strong><small>Choose your date, court, and time</small></span>
+        <span class="welcome-cta-arrow" aria-hidden="true">→</span>
+      </button>
+    </main>
+
+    <footer class="welcome-footer">
+      <nav class="welcome-contact-row" aria-label="Contact D’fortees Pickleball Court">
+        <a href="https://www.facebook.com/Dfortees" target="_blank" rel="noopener noreferrer" aria-label="Visit D’fortees on Facebook">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 8h3V4.5c-.6-.1-1.8-.2-3.2-.2-3.1 0-5.2 1.9-5.2 5.4V12H5v4h3.6v8h4.4v-8h3.5l.6-4H13V10c0-1.2.3-2 1-2Z"></path></svg>
+          <span>D’fortees Facebook</span>
+        </a>
+        <span class="welcome-contact-divider" aria-hidden="true"></span>
+        <a href="tel:+639232579854" aria-label="Call D’fortees at 0923 257 9854">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.1 3.5 9.5 7a2 2 0 0 1-.2 2.5l-1.1 1.1a15.5 15.5 0 0 0 5.2 5.2l1.1-1.1a2 2 0 0 1 2.5-.2l3.5 2.4a2 2 0 0 1 .8 2.2l-.5 1.8a2 2 0 0 1-2 1.5C9.3 21.8 2.2 14.7 1.6 5.2a2 2 0 0 1 1.5-2l1.8-.5a2 2 0 0 1 2.2.8Z"></path></svg>
+          <span>0923 257 9854</span>
+        </a>
       </nav>
-    </section>
+      <div class="welcome-address">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+        <span data-brand-address>Prk-4 National Highway, 8801 Montevista</span>
+      </div>
+    </footer>
   </div>
 </div>
 
