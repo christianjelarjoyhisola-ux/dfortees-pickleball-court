@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-  [switch]$AllowDemoMode
+  [switch]$AllowDemoMode,
+  [switch]$AllowDevelopmentBackend
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,12 +42,22 @@ if ($projectName -match "korte") {
 }
 $branchName = if ($envMap["CLOUDFLARE_PAGES_BRANCH"]) { $envMap["CLOUDFLARE_PAGES_BRANCH"] } else { "main" }
 
-$supabaseConfig = Get-Content -LiteralPath "supabase-config.js" -Raw
-if ($supabaseConfig -match "NOT_CONFIGURED|dfortees-backend\.invalid") {
+$runtimeUrl = [string]$envMap["PB_SUPABASE_URL"]
+$runtimeKey = [string]$envMap["PB_SUPABASE_PUBLISHABLE_KEY"]
+$runtimeTenant = [string]$envMap["PB_TENANT_SLUG"]
+$backendConfigured = $runtimeUrl -match '^https://[a-z0-9]+\.supabase\.co$' -and
+  $runtimeKey -match '^sb_publishable_' -and
+  $runtimeTenant -match '^[a-z0-9][a-z0-9-]{1,62}$'
+
+if (-not $backendConfigured) {
   if (-not $AllowDemoMode) {
-    throw "The backend is disabled. Configure the new D'fortees Supabase project or rerun with -AllowDemoMode for a browser-only demo deployment."
+    throw "Set PB_SUPABASE_URL, PB_SUPABASE_PUBLISHABLE_KEY, and PB_TENANT_SLUG in .env.local, or use -AllowDemoMode."
   }
   Write-Warning "Deploying D'fortees in browser-only demo mode. Data will be local to each visitor's browser."
+} elseif ($runtimeUrl -match "ekldjeskfddtzznamkxh" -and -not $AllowDevelopmentBackend) {
+  throw "The backend is the Free development project. Pass -AllowDevelopmentBackend only for an intentional non-production preview."
+} elseif ($runtimeUrl -match 'korte') {
+  throw "A blocked legacy Supabase URL was detected. Deployment stopped."
 }
 
 $publicFiles = @(
@@ -69,6 +80,18 @@ New-Item -ItemType Directory -Force ".cf-pages-deploy" | Out-Null
 foreach ($file in $publicFiles) {
   if (Test-Path $file) {
     Copy-Item -LiteralPath $file -Destination ".cf-pages-deploy" -Force
+  }
+}
+
+if ($backendConfigured) {
+  $runtimeSecrets = @{
+    "PB_SUPABASE_URL" = $runtimeUrl
+    "PB_SUPABASE_PUBLISHABLE_KEY" = $runtimeKey
+    "PB_TENANT_SLUG" = $runtimeTenant
+  }
+  foreach ($name in $runtimeSecrets.Keys) {
+    $runtimeSecrets[$name] | npx wrangler pages secret put $name --project-name $projectName
+    if ($LASTEXITCODE -ne 0) { throw "Could not configure the Cloudflare runtime value $name." }
   }
 }
 

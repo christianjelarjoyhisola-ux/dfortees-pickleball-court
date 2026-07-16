@@ -1,0 +1,14 @@
+project_id = "ekldjeskfddtzznamkxh"
+
+[api]
+enabled = true
+
+[db]
+major_version = 17
+
+[functions.manage-member]
+verify_jwt = false
+
+[functions.create-file-upload]
+verify_jwt = false
+

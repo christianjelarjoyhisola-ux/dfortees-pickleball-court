@@ -3,12 +3,21 @@
 // Replace these with your actual project credentials.
 // Find them at: Supabase Dashboard â†’ Project Settings â†’ API
 // =============================================
-const SUPABASE_URL = 'https://dfortees-backend.invalid';
-const SUPABASE_ANON_KEY = 'DFORTEES_SUPABASE_PUBLISHABLE_KEY_NOT_CONFIGURED';
+const PB_RUNTIME_CONFIG = Object.freeze(window.PB_RUNTIME_CONFIG || {});
+const SUPABASE_URL = typeof PB_RUNTIME_CONFIG.supabaseUrl === 'string'
+  ? PB_RUNTIME_CONFIG.supabaseUrl.trim()
+  : 'https://dfortees-backend.invalid';
+const SUPABASE_ANON_KEY = typeof PB_RUNTIME_CONFIG.supabasePublishableKey === 'string'
+  ? PB_RUNTIME_CONFIG.supabasePublishableKey.trim()
+  : 'DFORTEES_SUPABASE_PUBLISHABLE_KEY_NOT_CONFIGURED';
+const PB_TENANT_SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/.test(PB_RUNTIME_CONFIG.tenantSlug || '')
+  ? PB_RUNTIME_CONFIG.tenantSlug
+  : 'dfortees';
 const PB_BACKEND_CONFIGURED = !SUPABASE_URL.endsWith('.invalid')
   && !SUPABASE_ANON_KEY.includes('NOT_CONFIGURED');
 
 window.PB_BACKEND_CONFIGURED = PB_BACKEND_CONFIGURED;
+window.PB_TENANT_SLUG = PB_TENANT_SLUG;
 
 const PB_REQUEST_TIMEOUT_MS = 45000;
 const PB_RECEIPT_TIMEOUT_MS = 90000;
@@ -45,6 +54,82 @@ const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 // Expose globally so HTML pages can use real-time subscriptions
 window._supabase = _sb;
+
+async function _pbPlatformRpc(name, parameters) {
+  if (!PB_BACKEND_CONFIGURED) {
+    throw new Error("D'fortees backend is not configured. Local demo mode is active.");
+  }
+  const { data, error } = await _sb.rpc(name, parameters);
+  if (error) throw error;
+  return data;
+}
+
+// Clean multi-tenant public boundary. Guest callers never query booking rows
+// directly; pricing, locking, totals, references, and status access are all
+// enforced by security-definer database functions.
+window.PlatformAPI = Object.freeze({
+  getTenant() {
+    return _pbPlatformRpc('get_public_tenant', { p_tenant_slug: PB_TENANT_SLUG });
+  },
+  getAvailability(bookingDate) {
+    return _pbPlatformRpc('get_public_availability', {
+      p_tenant_slug: PB_TENANT_SLUG,
+      p_booking_date: bookingDate,
+    });
+  },
+  createGuestBooking({ courtId, bookingDate, slots, customerDetails, idempotencyKey }) {
+    const requestKey = idempotencyKey || crypto.randomUUID();
+    return _pbPlatformRpc('create_guest_booking', {
+      p_tenant_slug: PB_TENANT_SLUG,
+      p_court_id: courtId,
+      p_booking_date: bookingDate,
+      p_slots: (slots || []).map(Number),
+      p_customer_details: customerDetails || {},
+      p_idempotency_key: requestKey,
+    });
+  },
+  getGuestBookingStatus({ bookingReference, accessToken }) {
+    return _pbPlatformRpc('get_guest_booking_status', {
+      p_tenant_slug: PB_TENANT_SLUG,
+      p_booking_reference: bookingReference,
+      p_access_token: accessToken,
+    });
+  },
+  cancelGuestBooking({ bookingReference, accessToken, reason }) {
+    return _pbPlatformRpc('cancel_guest_booking', {
+      p_tenant_slug: PB_TENANT_SLUG,
+      p_booking_reference: bookingReference,
+      p_access_token: accessToken,
+      p_reason: reason || 'Cancelled by guest',
+    });
+  },
+});
+
+const PB_GUEST_ACCESS_KEY = 'df_guest_booking_access_v1';
+const _pbGuestRuntimeBookings = new Map();
+
+function _pbReadGuestAccess() {
+  try { return JSON.parse(sessionStorage.getItem(PB_GUEST_ACCESS_KEY) || '{}') || {}; }
+  catch (_) { return {}; }
+}
+
+function _pbRememberGuestAccess(clientReference, bookingReference, accessToken) {
+  const state = _pbReadGuestAccess();
+  const value = { bookingReference, accessToken };
+  state[clientReference] = value;
+  state[bookingReference] = value;
+  sessionStorage.setItem(PB_GUEST_ACCESS_KEY, JSON.stringify(state));
+}
+
+function _pbForgetGuestAccess(reference) {
+  const state = _pbReadGuestAccess();
+  const linked = state[reference]?.bookingReference;
+  delete state[reference];
+  if (linked) delete state[linked];
+  sessionStorage.setItem(PB_GUEST_ACCESS_KEY, JSON.stringify(state));
+  _pbGuestRuntimeBookings.delete(reference);
+  if (linked) _pbGuestRuntimeBookings.delete(linked);
+}
 
 const PB_IS_LOCAL_HOST = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
 const PB_DATA_MODE_KEY = 'df_data_mode';
@@ -451,6 +536,46 @@ function rowToBooking(r) {
   };
 }
 
+function rowToPlatformBooking(r) {
+  const slots = (r.slots || []).map(Number);
+  const courtName = r.courts?.name || r.court_name || '';
+  return {
+    ref: r.booking_reference,
+    groupRef: null,
+    fullName: r.customer_name || '',
+    contactNumber: r.customer_phone || '',
+    email: r.customer_email || '',
+    courtId: r.court_id,
+    courtName,
+    date: r.booking_date,
+    slots,
+    startTime: slots.length ? _fmtBookingHour(Math.min(...slots)) : '',
+    endTime: slots.length ? _fmtBookingHour(Math.max(...slots) + 1) : '',
+    timeLabel: _bookingSlotsTimeLabel(slots),
+    duration: slots.length,
+    rate: slots.length ? Number(r.total_amount || 0) / slots.length : 0,
+    total: Number(r.total_amount || 0),
+    paymentMethod: 'cash',
+    paymentStatus: r.payment_status || 'unpaid',
+    status: r.status,
+    createdVia: r.source === 'web' ? 'customer' : r.source,
+    createdAt: r.created_at,
+    holdExpiresAt: r.hold_expires_at || null,
+  };
+}
+
+function _pbPlatformBookingStatus(status) {
+  const value = String(status || '').toLowerCase();
+  if (['confirmed', 'completed', 'cancelled', 'expired', 'voided'].includes(value)) return value;
+  return 'pending';
+}
+
+function _pbPlatformPaymentStatus(status) {
+  const value = String(status || '').toLowerCase();
+  if (['paid', 'rejected', 'refunded', 'voided'].includes(value)) return value;
+  return value === 'unpaid' ? 'unpaid' : 'pending';
+}
+
 function archivePayloadToBooking(payload) {
   if (!payload || typeof payload !== 'object') return null;
   return Object.prototype.hasOwnProperty.call(payload, 'full_name') || Object.prototype.hasOwnProperty.call(payload, 'court_id')
@@ -767,20 +892,49 @@ window.DB = {
   // ---- COURTS ----
   async getCourts() {
     return _pbCached('courts', {}, PB_FAST_CACHE_MS.courts, async () => {
-      const { data, error } = await _sb.from('courts').select('*').order('id');
-      if (error) { console.error('getCourts:', error); return []; }
-      return data.map(rowToCourt);
+      try {
+        const tenant = await window.PlatformAPI.getTenant();
+        return (tenant?.courts || []).map(court => ({
+          id: court.id,
+          name: court.name,
+          desc: court.description || court.environment,
+          rate: Number(court.rate || 0),
+          blocked: false,
+          feats: [court.environment].filter(Boolean),
+          photo: '',
+          rateSchedule: (court.rateSchedule || []).map(rule => ({
+            from: Number(rule.from),
+            to: Number(rule.to),
+            rate: Number(rule.rate),
+          })),
+        }));
+      } catch (error) {
+        console.error('getCourts:', error);
+        return [];
+      }
     });
   },
 
   async saveCourt(court) {
-    const { error } = await _sb.from('courts').upsert(courtToRow(court));
+    const tenant = await window.PlatformAPI.getTenant();
+    const row = {
+      tenant_id: tenant.id,
+      name: court.name,
+      slug: String(court.slug || court.name || 'court').toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 63),
+      description: court.desc || null,
+      environment: (court.feats || []).find(value => ['Indoor', 'Outdoor', 'Covered'].includes(value)) || 'Outdoor',
+      is_active: !court.blocked,
+    };
+    if (/^[0-9a-f-]{36}$/i.test(String(court.id || ''))) row.id = court.id;
+    const { error } = await _sb.from('courts').upsert(row);
     if (error) { console.error('saveCourt:', error); throw error; }
     _pbClearFastCache(['courts']);
   },
 
   async deleteCourt(id) {
-    const { error } = await _sb.from('courts').delete().eq('id', id);
+    const tenant = await window.PlatformAPI.getTenant();
+    const { error } = await _sb.from('courts').delete().eq('tenant_id', tenant.id).eq('id', id);
     if (error) console.error('deleteCourt:', error);
     _pbClearFastCache(['courts']);
   },
@@ -789,11 +943,44 @@ window.DB = {
   async getBookings(filters = {}) {
     const opts = filters || {};
     return _pbCached('bookings', opts, PB_FAST_CACHE_MS.bookings, async () => {
-      let query = _sb.from('bookings').select('*').order('created_at', { ascending: false });
-      if (opts.date) query = query.eq('date', opts.date);
+      const { data: authState } = await _sb.auth.getSession();
+      if (!authState?.session) {
+        if (!opts.date) return [];
+        const availability = await window.PlatformAPI.getAvailability(opts.date);
+        const rows = [];
+        for (const court of availability?.courts || []) {
+          if (opts.courtId && String(opts.courtId) !== String(court.id)) continue;
+          for (const slot of court.slots || []) {
+            if (slot.available) continue;
+            rows.push({
+              ref: `UNAVAILABLE-${court.id}-${opts.date}-${slot.startHour}`,
+              fullName: '',
+              contactNumber: '',
+              email: '',
+              courtId: court.id,
+              courtName: court.name,
+              date: opts.date,
+              slots: [Number(slot.startHour)],
+              startTime: _fmtBookingHour(slot.startHour),
+              endTime: _fmtBookingHour(Number(slot.startHour) + 1),
+              timeLabel: _bookingSlotsTimeLabel([slot.startHour]),
+              duration: 1,
+              rate: Number(slot.price || 0),
+              total: Number(slot.price || 0),
+              paymentMethod: 'cash',
+              paymentStatus: 'unpaid',
+              status: 'confirmed',
+              createdAt: null,
+            });
+          }
+        }
+        return rows;
+      }
+
+      let query = _sb.from('bookings').select('*,courts!inner(name)').order('created_at', { ascending: false });
+      if (opts.date) query = query.eq('booking_date', opts.date);
       if (opts.courtId) query = query.eq('court_id', String(opts.courtId));
-      if (opts.hostUserId) query = query.eq('host_user_id', String(opts.hostUserId));
-      if (opts.activeOnly) query = query.neq('status', 'cancelled').neq('status', 'forfeited');
+      if (opts.activeOnly) query = query.in('status', ['pending', 'confirmed', 'completed']);
       const { data, error } = await query;
       if (error) {
         console.error('getBookings:', error);
@@ -802,40 +989,156 @@ window.DB = {
         if (opts.hostUserId) throw error;
         return [];
       }
-      return data.map(rowToBooking);
+      return data.map(rowToPlatformBooking);
     });
   },
 
   async addBooking(booking) {
-    // Check for slot conflicts before inserting
-    const { data: existing } = await _sb
-      .from('bookings')
-      .select('ref, status, slots, created_at')
-      .eq('court_id', booking.courtId)
-      .eq('date', booking.date)
-      .neq('status', 'cancelled')
-      .neq('status', 'forfeited');
-
-    if (hasSlotConflict(existing, booking)) {
-      throw new Error('One or more time slots are no longer available. Please refresh and choose a different time.');
+    const clientReference = booking.ref || crypto.randomUUID();
+    const isDraft = /^Reserving/i.test(String(booking.fullName || ''))
+      || String(booking.email || '').endsWith('@hold.internal');
+    if (isDraft) {
+      const draft = { ...booking, ref: clientReference, _platformDraft: true };
+      _pbGuestRuntimeBookings.set(clientReference, draft);
+      return { bookingReference: clientReference, draft: true };
     }
 
-    const row = bookingToRow(booking);
-    let { error } = await _sb.from('bookings').insert(row);
-    if (error && isMissingOptionalBookingColumnError(error) && !booking.hostBooking) {
-      ({ error } = await _sb.from('bookings').insert(withoutOptionalBookingColumns(row)));
-    }
-    if (error) { console.error('addBooking:', error); throw error; }
+    const result = await window.PlatformAPI.createGuestBooking({
+      courtId: booking.courtId,
+      bookingDate: booking.date,
+      slots: booking.slots,
+      customerDetails: {
+        fullName: booking.fullName,
+        phone: booking.contactNumber,
+        email: booking.email,
+        notes: booking.notes || '',
+      },
+    });
+    const saved = { ...booking, ref: result.bookingReference, status: result.status, total: Number(result.totalAmount) };
+    _pbGuestRuntimeBookings.set(clientReference, saved);
+    _pbGuestRuntimeBookings.set(result.bookingReference, saved);
+    _pbRememberGuestAccess(clientReference, result.bookingReference, result.accessToken);
     _pbClearFastCache(['bookings']);
+    return result;
   },
 
   async getBookingByRef(ref) {
-    const { data, error } = await _sb.from('bookings').select('*').eq('ref', ref).single();
+    const runtime = _pbGuestRuntimeBookings.get(ref);
+    if (runtime?._platformDraft) return runtime;
+    const access = _pbReadGuestAccess()[ref];
+    if (access) {
+      const status = await window.PlatformAPI.getGuestBookingStatus({
+        bookingReference: access.bookingReference,
+        accessToken: access.accessToken,
+      });
+      if (!status) return null;
+      const base = runtime || _pbGuestRuntimeBookings.get(access.bookingReference) || {};
+      return {
+        ...base,
+        ref: status.bookingReference,
+        courtName: status.court,
+        date: status.date,
+        slots: status.slots || [],
+        timeLabel: _bookingSlotsTimeLabel(status.slots || []),
+        duration: (status.slots || []).length,
+        status: status.status,
+        paymentStatus: status.paymentStatus,
+        total: Number(status.totalAmount || 0),
+        createdAt: status.createdAt,
+      };
+    }
+
+    const { data: authState } = await _sb.auth.getSession();
+    if (!authState?.session) return null;
+    const { data, error } = await _sb.from('bookings')
+      .select('*,courts!inner(name)')
+      .eq('booking_reference', ref)
+      .maybeSingle();
     if (error) { console.error('getBookingByRef:', error); return null; }
-    return rowToBooking(data);
+    return data ? rowToPlatformBooking(data) : null;
   },
 
   async updateBooking(ref, updates) {
+    const { data: authState } = await _sb.auth.getSession();
+    const draft = _pbGuestRuntimeBookings.get(ref);
+    const access = _pbReadGuestAccess()[ref];
+
+    if (!authState?.session) {
+      if (draft?._platformDraft) {
+        if (['cancelled', 'expired', 'rejected'].includes(String(updates.status || '').toLowerCase())
+            && !updates.fullName) {
+          _pbGuestRuntimeBookings.delete(ref);
+          return { bookingReference: ref, status: 'cancelled', draft: true };
+        }
+        const combined = { ...draft, ...updates };
+        const result = await window.PlatformAPI.createGuestBooking({
+          courtId: combined.courtId,
+          bookingDate: combined.date,
+          slots: combined.slots,
+          customerDetails: {
+            fullName: combined.fullName,
+            phone: combined.contactNumber,
+            email: combined.email,
+            notes: combined.notes || '',
+          },
+        });
+        const saved = {
+          ...combined,
+          ref: result.bookingReference,
+          status: result.status,
+          paymentStatus: result.paymentStatus,
+          total: Number(result.totalAmount),
+          _platformDraft: false,
+        };
+        _pbGuestRuntimeBookings.set(ref, saved);
+        _pbGuestRuntimeBookings.set(result.bookingReference, saved);
+        _pbRememberGuestAccess(ref, result.bookingReference, result.accessToken);
+        _pbClearFastCache(['bookings']);
+        return result;
+      }
+
+      if (access && ['cancelled', 'expired', 'rejected'].includes(String(updates.status || '').toLowerCase())) {
+        const result = await window.PlatformAPI.cancelGuestBooking({
+          bookingReference: access.bookingReference,
+          accessToken: access.accessToken,
+          reason: updates.cancellationReason || 'Cancelled by guest',
+        });
+        _pbClearFastCache(['bookings']);
+        return result;
+      }
+      if (access) return window.PlatformAPI.getGuestBookingStatus({
+        bookingReference: access.bookingReference,
+        accessToken: access.accessToken,
+      });
+      throw new Error('This guest booking cannot be changed without its private access token.');
+    }
+
+    const platformRow = {};
+    if (updates.status !== undefined) platformRow.status = _pbPlatformBookingStatus(updates.status);
+    if (updates.fullName !== undefined) platformRow.customer_name = updates.fullName;
+    if (updates.contactNumber !== undefined) platformRow.customer_phone = updates.contactNumber;
+    if (updates.email !== undefined) platformRow.customer_email = updates.email || null;
+    if (updates.paymentStatus !== undefined) platformRow.payment_status = _pbPlatformPaymentStatus(updates.paymentStatus);
+    if (updates.total !== undefined) platformRow.total_amount = Number(updates.total);
+    if (updates.date !== undefined) platformRow.booking_date = updates.date;
+    if (updates.slots !== undefined) platformRow.slots = updates.slots.map(Number);
+    if (platformRow.status === 'cancelled') {
+      platformRow.cancelled_at = new Date().toISOString();
+      platformRow.cancellation_reason = updates.cancellationReason || 'Cancelled by team member';
+    }
+    const { data: platformData, error: platformError } = await _sb.from('bookings')
+      .update(platformRow)
+      .eq('booking_reference', ref)
+      .select('booking_reference,status,payment_status');
+    if (platformError) { console.error('updateBooking:', platformError); throw platformError; }
+    if (!platformData?.length) throw new Error(`Booking ${ref} was not updated or is outside your tenant.`);
+    _pbClearFastCache(['bookings']);
+    return {
+      bookingReference: platformData[0].booking_reference,
+      status: platformData[0].status,
+      paymentStatus: platformData[0].payment_status,
+    };
+
     // Map only the fields provided (camelCase â†’ snake_case)
     const row = {};
     if (updates.status    !== undefined) row.status = updates.status;
@@ -903,7 +1206,9 @@ window.DB = {
   },
 
   async deleteBooking(ref) {
-    const { error } = await _sb.from('bookings').delete().eq('ref', ref);
+    const { data: authState } = await _sb.auth.getSession();
+    if (!authState?.session) return this.updateBooking(ref, { status: 'cancelled' });
+    const { error } = await _sb.from('bookings').delete().eq('booking_reference', ref);
     if (error) { console.error('deleteBooking:', error); throw error; }
     _pbClearFastCache(['bookings']);
   },
@@ -1287,29 +1592,62 @@ window.DB = {
   // ---- BLOCKED DATES ----
   async getBlockedDates() {
     return _pbCached('blockedDates', {}, PB_FAST_CACHE_MS.blockedDates, async () => {
-      const { data, error } = await _sb.from('blocked_dates').select('date').order('date');
+      const { data: authState } = await _sb.auth.getSession();
+      if (!authState?.session) return [];
+      const { data, error } = await _sb.from('blocked_dates').select('blocked_date').order('blocked_date');
       if (error) { console.error('getBlockedDates:', error); return []; }
-      return data.map(r => r.date);
+      return [...new Set(data.map(r => r.blocked_date))];
     });
   },
 
   async addBlockedDate(date) {
-    const { error } = await _sb.from('blocked_dates').insert({ date, created_at: new Date().toISOString() });
+    const tenant = await window.PlatformAPI.getTenant();
+    const { error } = await _sb.from('blocked_dates').insert({ tenant_id: tenant.id, blocked_date: date });
     if (error) console.error('addBlockedDate:', error);
     _pbClearFastCache(['blockedDates']);
   },
 
   async removeBlockedDate(date) {
-    const { error } = await _sb.from('blocked_dates').delete().eq('date', date);
+    const tenant = await window.PlatformAPI.getTenant();
+    const { error } = await _sb.from('blocked_dates').delete().eq('tenant_id', tenant.id).eq('blocked_date', date);
     if (error) console.error('removeBlockedDate:', error);
     _pbClearFastCache(['blockedDates']);
   },
 
   // ---- ACCOUNTS ----
   async getAccounts() {
-    const { data, error } = await _sb.from('accounts').select('*').order('created_at');
-    if (error) { console.error('getAccounts:', error); return []; }
-    return data.map(rowToAccount);
+    const tenant = await window.PlatformAPI.getTenant();
+    const { data: memberships, error } = await _sb
+      .from('tenant_memberships')
+      .select('tenant_id,user_id,role,status,created_at')
+      .eq('tenant_id', tenant.id)
+      .order('created_at');
+    if (error) { console.error('getAccounts memberships:', error); return []; }
+
+    const userIds = (memberships || []).map(row => row.user_id);
+    if (!userIds.length) return [];
+    const [{ data: profiles, error: profileError }, { data: platformAdmins }] = await Promise.all([
+      _sb.from('profiles').select('user_id,email,display_name,phone').in('user_id', userIds),
+      _sb.from('platform_admins').select('user_id').in('user_id', userIds),
+    ]);
+    if (profileError) { console.error('getAccounts profiles:', profileError); return []; }
+
+    const profilesById = new Map((profiles || []).map(profile => [profile.user_id, profile]));
+    const platformIds = new Set((platformAdmins || []).map(row => row.user_id));
+    return memberships.map(membership => {
+      const profile = profilesById.get(membership.user_id) || {};
+      return {
+        id: membership.user_id,
+        username: profile.email || '',
+        role: platformIds.has(membership.user_id)
+          ? 'owner'
+          : membership.role === 'owner' ? 'court_owner' : membership.role,
+        status: membership.status,
+        fullName: profile.display_name || profile.email || 'Team member',
+        email: profile.email || '',
+        createdAt: membership.created_at,
+      };
+    });
   },
 
   async getHostFinanceAccounts() {
@@ -1345,16 +1683,34 @@ window.DB = {
   // ---- SETTINGS ----
   async getSettings() {
     return _pbCached('settings', {}, PB_FAST_CACHE_MS.settings, async () => {
-      const { data, error } = await _sb.from('settings').select('*');
+      const tenant = await window.PlatformAPI.getTenant();
+      const defaults = {
+        open_hour: '6',
+        close_hour: '24',
+        payment_acceptance_mode: 'full_payment_only',
+        payment_method_cash: '1',
+        payment_method_gcash: '0',
+        payment_method_bdopay: '0',
+        payment_method_maya: '0',
+        payment_method_bpi: '0',
+        payment_method_gotyme: '0',
+        payment_method_pnb: '0',
+        service_fee_rate: '0',
+        maintenance_fee: '0',
+      };
+      const { data: authState } = await _sb.auth.getSession();
+      if (!authState?.session) return defaults;
+      const { data, error } = await _sb.from('tenant_settings').select('key,value').eq('tenant_id', tenant.id);
       if (error) { console.error('getSettings:', error); return {}; }
-      const out = {};
+      const out = { ...defaults };
       data.forEach(r => out[r.key] = r.value);
       return out;
     });
   },
 
   async saveSetting(key, value) {
-    const { error } = await _sb.from('settings').upsert({ key, value });
+    const tenant = await window.PlatformAPI.getTenant();
+    const { error } = await _sb.from('tenant_settings').upsert({ tenant_id: tenant.id, key, value });
     if (error) { console.error('saveSetting:', error); throw error; }
     _pbClearFastCache(['settings']);
   },
@@ -1514,13 +1870,9 @@ window.DB = {
 
   // ---- SEED DEFAULT DATA (runs once on first load) ----
   async seedDefaultData() {
-    const courts = await this.getCourts();
-    if (courts.length === 0) {
-      await _sb.from('courts').insert([
-        { id: 'c1', name: 'Court Alpha', description: 'Outdoor Â· Air passing through Â· Standard Flooring', rate: 350, blocked: false, feats: ['Outdoor','Open Air','Standard Floor'], photo: null },
-        { id: 'c2', name: 'Court Beta',  description: 'Outdoor Â· Air passing through Â· Standard Flooring', rate: 280, blocked: false, feats: ['Outdoor','Open Air','Standard Floor'], photo: null },
-      ]);
-    }
+    // Canonical tenant/court seeds are applied only by reviewed migrations.
+    // A public page must never create placeholder venue data.
+    return this.getCourts();
   },
 
   // Check if user has accepted the current agreement version
@@ -1881,128 +2233,54 @@ window.DB = {
 (function installLocalDataMode() {
   if (!window.PB_USE_LOCAL_DATA) return;
 
-  const STORE_KEY = 'df_local_db_v1';
+  const STORE_KEY = 'df_local_db_v2';
   const nowIso = () => new Date().toISOString();
   const localRef = prefix => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`.toUpperCase();
 
-  const defaultCourts = () => Array.from({ length: 10 }, (_, i) => {
-    const n = i + 1;
-    return {
-      id: `c${n}`,
-      name: n === 1 ? 'D’fortees Pickleball Court' : `Court ${n}`,
-      desc: 'Outdoor',
-      rate: n <= 5 ? 60 : 90,
-      blocked: false,
-      feats: ['Outdoor'],
-      photo: '',
-      rateSchedule: [
-        { from: 6, to: 18, rate: 60 },
-        { from: 18, to: 23, rate: 90 },
-      ],
-    };
-  });
+  const defaultCourts = () => ([{
+    id: 'c1',
+    name: 'D’fortees Pickleball Court',
+    desc: 'Outdoor',
+    rate: 60,
+    blocked: false,
+    feats: ['Outdoor'],
+    photo: '',
+    rateSchedule: [
+      { from: 6, to: 18, rate: 60 },
+      { from: 18, to: 24, rate: 90 },
+    ],
+  }]);
 
   const defaultSettings = () => ({
     open_hour: '6',
     close_hour: '24',
     open_play_config: JSON.stringify({
-      enabled: true,
+      enabled: false,
       start: 6,
       end: 23,
       days: [0, 6],
-      specificDates: ['2026-06-20'],
+      specificDates: [],
       courtIds: [],
       fee: 25,
       maxPlayers: 16,
     }),
     payment_acceptance_mode: 'full_payment_only',
-    payment_method_cash: '0',
-    payment_method_gcash: '1',
-    payment_method_bdopay: '1',
-    payment_method_maya: '1',
-    payment_method_bpi: '1',
+    payment_method_cash: '1',
+    payment_method_gcash: '0',
+    payment_method_bdopay: '0',
+    payment_method_maya: '0',
+    payment_method_bpi: '0',
     payment_method_gotyme: '0',
     payment_method_pnb: '0',
-    gcash_merchant_number: '09XXXXXXXXX',
-    gcash_merchant_name: 'Court Owner Name',
-    service_fee_rate: '15',
-    maintenance_fee: '5',
+    gcash_merchant_number: '',
+    gcash_merchant_name: '',
+    service_fee_rate: '0',
+    maintenance_fee: '0',
     fee_type: 'per_hour',
   });
 
-  const defaultAccounts = () => ([
-    {
-      id: 'owner_001',
-      username: 'developer',
-      password: 'dev123',
-      role: 'owner',
-      status: 'active',
-      fullName: 'System Owner',
-      email: 'owner@dfortees.local',
-      createdAt: nowIso(),
-    },
-    {
-      id: 'host_test_001',
-      username: 'host.test',
-      password: 'HostTest123!',
-      role: 'host',
-      status: 'active',
-      fullName: 'Open Play Test Host',
-      email: 'host.test@dfortees.local',
-      createdAt: nowIso(),
-    },
-  ]);
-
-  const defaultHostDemoBookings = () => {
-    const makeHostBooking = ({ ref, groupRef = null, courtId, courtName, date, slots, rate, method = 'gcash', gcashRef = '', paymentStatus = 'downpayment_paid', status = 'confirmed', createdDaysAgo = 0 }) => {
-      const duration = slots.length;
-      const courtFee = duration * rate;
-      const serviceFee = duration * 5;
-      const total = courtFee + serviceFee;
-      const downpayment = Math.round((courtFee * 0.25) + serviceFee);
-      const start = Math.min(...slots);
-      const end = Math.max(...slots) + 1;
-      return {
-        ref,
-        groupRef,
-        fullName: 'Open Play Test Host',
-        contactNumber: '09171234567',
-        email: 'host.test@dfortees.local',
-        courtId,
-        courtName,
-        date,
-        slots,
-        startTime: _fmtBookingHour(start),
-        endTime: _fmtBookingHour(end),
-        timeLabel: `${_fmtBookingHour(start)} - ${_fmtBookingHour(end)}`,
-        duration,
-        rate,
-        total,
-        paymentMethod: method,
-        paymentFlow: method,
-        gcashRef,
-        downpayment: paymentStatus === 'paid' ? total : downpayment,
-        hostBooking: true,
-        hostUserId: 'host_test_001',
-        hostName: 'Open Play Test Host',
-        hostEmail: 'host.test@dfortees.local',
-        paymentStatus,
-        status,
-        createdAt: new Date(Date.now() - createdDaysAgo * 86400000).toISOString(),
-      };
-    };
-    return [
-      makeHostBooking({ ref: 'HOST-DEMO-001', courtId: 'c1', courtName: 'D’fortees Pickleball Court', date: '2026-07-12', slots: [14, 15], rate: 60, gcashRef: '1234567890123', createdDaysAgo: 1 }),
-      makeHostBooking({ ref: 'HOST-DEMO-002', courtId: 'c2', courtName: 'Court 2', date: '2026-07-14', slots: [18, 19, 20], rate: 90, gcashRef: '9876543210123', createdDaysAgo: 2 }),
-      makeHostBooking({ ref: 'HOST-DEMO-003', courtId: 'c3', courtName: 'Court 3', date: '2026-07-18', slots: [8, 9], rate: 60, method: 'cash', paymentStatus: 'unpaid', status: 'pending', createdDaysAgo: 0 }),
-      makeHostBooking({ ref: 'HOST-DEMO-004', courtId: 'c4', courtName: 'Court 4', date: '2026-07-04', slots: [16, 17], rate: 60, gcashRef: '2223334445556', paymentStatus: 'paid', createdDaysAgo: 6 }),
-      makeHostBooking({ ref: 'HOST-DEMO-005', courtId: 'c5', courtName: 'Court 5', date: '2026-06-29', slots: [19, 20, 21], rate: 90, gcashRef: '3334445556667', paymentStatus: 'downpayment_paid', createdDaysAgo: 12 }),
-      makeHostBooking({ ref: 'HOST-DEMO-006', courtId: 'c6', courtName: 'Court 6', date: '2026-07-20', slots: [10, 11, 12], rate: 90, gcashRef: '4445556667778', paymentStatus: 'for_verification', status: 'verifying', createdDaysAgo: 0 }),
-      makeHostBooking({ ref: 'HOST-DEMO-MULTI-001-A', groupRef: 'HOST-DEMO-MULTI-001', courtId: 'c7', courtName: 'Court 7', date: '2026-07-25', slots: [17, 18, 19, 20], rate: 90, gcashRef: '5556667778889', createdDaysAgo: 0 }),
-      makeHostBooking({ ref: 'HOST-DEMO-MULTI-001-B', groupRef: 'HOST-DEMO-MULTI-001', courtId: 'c8', courtName: 'Court 8', date: '2026-07-25', slots: [17, 18, 19, 20], rate: 90, gcashRef: '5556667778889', createdDaysAgo: 0 }),
-      makeHostBooking({ ref: 'HOST-DEMO-MULTI-001-C', groupRef: 'HOST-DEMO-MULTI-001', courtId: 'c9', courtName: 'Court 9', date: '2026-07-25', slots: [17, 18, 19, 20], rate: 90, gcashRef: '5556667778889', createdDaysAgo: 0 }),
-    ];
-  };
+  const defaultAccounts = () => [];
+  const defaultHostDemoBookings = () => [];
 
   function freshDb() {
     return {
@@ -2821,21 +3099,37 @@ window.Auth = {
       return null;
     }
 
-    const { data: acc, error: accountErr } = await _sb
-      .from('accounts')
-      .select('*')
-      .eq('id', authData.user.id)
-      .maybeSingle();
+    let tenant;
+    try {
+      tenant = await window.PlatformAPI.getTenant();
+    } catch (tenantError) {
+      console.error('refreshSessionFromAuth tenant lookup:', tenantError);
+      this._lastLoginMessage = 'Could not load this venue. Please try again in a moment.';
+      return null;
+    }
 
-    if (accountErr) {
-      console.error('refreshSessionFromAuth account lookup:', accountErr);
+    const [profileResult, platformResult, membershipResult] = await Promise.all([
+      _sb.from('profiles').select('user_id,email,display_name,phone').eq('user_id', authData.user.id).maybeSingle(),
+      _sb.from('platform_admins').select('user_id').eq('user_id', authData.user.id).maybeSingle(),
+      _sb.from('tenant_memberships')
+        .select('tenant_id,user_id,role,status')
+        .eq('tenant_id', tenant.id)
+        .eq('user_id', authData.user.id)
+        .maybeSingle(),
+    ]);
+
+    const accountError = profileResult.error || platformResult.error || membershipResult.error;
+    if (accountError) {
+      console.error('refreshSessionFromAuth account lookup:', accountError);
       this._lastLoginMessage = 'Could not verify your account status right now. Please try again in a moment.';
       sessionStorage.removeItem('df_session');
       localStorage.removeItem('df_session');
       return null;
     }
 
-    if (!acc) {
+    const isPlatformAdmin = !!platformResult.data;
+    const membership = membershipResult.data;
+    if (!isPlatformAdmin && !membership) {
       const meta = authData.user.user_metadata || {};
       if (meta.role === 'host' && meta.account_status === 'pending') {
         this._lastLoginMessage = 'Your host application is pending review.';
@@ -2850,7 +3144,24 @@ window.Auth = {
       return null;
     }
 
-    const session = { ...rowToAccount(acc), loginAt: new Date().toISOString() };
+    const platformRole = isPlatformAdmin
+      ? 'owner'
+      : membership.role === 'owner'
+        ? 'court_owner'
+        : membership.role;
+    const profile = profileResult.data || {};
+    const session = {
+      id: authData.user.id,
+      username: profile.email || authData.user.email,
+      email: profile.email || authData.user.email,
+      fullName: profile.display_name || authData.user.user_metadata?.display_name || authData.user.email,
+      role: platformRole,
+      status: isPlatformAdmin ? 'active' : membership.status,
+      tenantId: tenant.id,
+      tenantSlug: tenant.slug,
+      isPlatformAdmin,
+      loginAt: new Date().toISOString(),
+    };
 
     if (session.status && session.status !== 'active') {
       this._lastLoginMessage = session.status === 'pending'

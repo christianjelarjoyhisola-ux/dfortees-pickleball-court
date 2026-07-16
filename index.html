@@ -6258,7 +6258,7 @@ async function renderCourts() {
         <div class="cc-times-head">
           <div>
             <div class="cc-times-title">🕐 Available times</div>
-            <div class="cc-times-sub">Join Open Play or select any available court slots</div>
+            <div class="cc-times-sub">Select any available court time.</div>
           </div>
           <input type="hidden" id="cDate_${esc(c.id)}" value="${esc(selectedDate)}" />
         </div>
@@ -7031,7 +7031,7 @@ async function submitBookingLegacy(e) {
   try {
     if (_reservedRef) {
       // Slot was already reserved at Book Now — just fill in the details.
-      await DB.updateBooking(_reservedRef, {
+      const savedBooking = await DB.updateBooking(_reservedRef, {
         fullName:      booking.fullName,
         contactNumber: booking.contactNumber,
         email:         booking.email,
@@ -7052,11 +7052,13 @@ async function submitBookingLegacy(e) {
         status:        booking.status,
         createdAt:     booking.createdAt,
       });
+      if (savedBooking?.bookingReference) booking.ref = savedBooking.bookingReference;
       _reservedRef = null;
       _reservationStartedAt = null;
     } else {
       // Fallback: no prior reservation (e.g. wizard flow) — insert fresh.
-      await DB.addBooking(booking);
+      const savedBooking = await DB.addBooking(booking);
+      if (savedBooking?.bookingReference) booking.ref = savedBooking.bookingReference;
     }
     bookingSaved = true;
 
@@ -7296,7 +7298,7 @@ async function submitBooking(e) {
   try {
     for (const row of itemBookings) {
       if (heldRefs.has(row.ref)) {
-        await DB.updateBooking(row.ref, {
+        const savedBooking = await DB.updateBooking(row.ref, {
           fullName:      row.fullName,
           contactNumber: row.contactNumber,
           email:         row.email,
@@ -7317,10 +7319,14 @@ async function submitBooking(e) {
           status:        row.status,
           createdAt:     row.createdAt,
         });
+        if (savedBooking?.bookingReference) row.ref = savedBooking.bookingReference;
       } else {
-        await DB.addBooking(row);
+        const savedBooking = await DB.addBooking(row);
+        if (savedBooking?.bookingReference) row.ref = savedBooking.bookingReference;
       }
     }
+    booking.ref = itemBookings[0]?.ref || booking.ref;
+    booking.groupItems = itemBookings;
     clearReservationState();
     bookingSaved = true;
 
@@ -8744,6 +8750,7 @@ async function submitOpenPlay() {
   }
 }
 </script>
+<script src="/runtime-config.js"></script>
 <script src="supabase.min.js"></script>
 <script src="supabase-config.js?v=20260714-owner-void-v1"></script>
 

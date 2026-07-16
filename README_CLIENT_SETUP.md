@@ -1,14 +1,19 @@
-# D'fortees Production Setup Checklist
+# Multi-tenant production checklist
 
-1. Create a brand-new D'fortees Supabase project. Never reuse another venue's project.
-2. Generate and review the fresh database bundle with `tools/build-fresh-database-bundle.ps1 -SupabaseProjectUrl https://YOUR-NEW-PROJECT.supabase.co`.
-3. Apply the bundle only to the empty D'fortees project and verify all RLS roles.
-4. Create new owner, court-owner, staff, and host accounts.
-5. Configure `supabase-config.js` with only the new Project URL and browser publishable key.
-6. Set backend secrets in Supabase Edge Function secret storage; never commit them.
-7. Configure D'fortees court names, operating hours, rates, policies, payment accounts, contact details, and photos in the admin dashboard.
-8. Test bookings and payments in a staging environment.
-9. Create a new D'fortees Cloudflare Pages project and domain.
-10. Complete `.env.local` from `.env.example`, run `npm run verify`, and deploy only after every check passes.
-
-The deployment scripts stop before contacting an external service if the D'fortees safety marker or target project is missing. The Cloudflare script permits a backend-free browser-only demo only when `-AllowDemoMode` is supplied explicitly.
+1. Upgrade the Supabase project before accepting real bookings.
+2. Accept the first platform-owner invitation and set a strong password.
+3. Configure Supabase Auth Site URL and allowed redirect URLs for the intended
+   staging domain before testing password recovery or invitation links.
+4. Keep the canonical SQL under `platform/supabase/migrations/`; never apply the
+   legacy root `supabase/migrations/` chain to this project.
+5. Create `.env.local` from `.env.local.example`. Store tokens only in that
+   ignored file; frontend runtime configuration contains only public values.
+6. Run `npm run check`, `npm test`, `npm run verify`, and `npm run build:pages`.
+7. Test tenant owner login, staff isolation, availability, guest booking,
+   cancellation, private receipts, and mobile/desktop layouts on staging.
+8. Configure each Cloudflare project with its own `PB_TENANT_SLUG`, domain, and
+   branding. All sites may share the verified platform URL and publishable key.
+9. Keep manual per-tenant payments until a tenant-specific provider integration
+   and signed webhook path have passed review.
+10. Switch production only after every acceptance gate passes. Never point this
+    project or its scripts at Korte infrastructure.

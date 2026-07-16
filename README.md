@@ -1,57 +1,69 @@
-# D'fortees Pickleball Court Booking System
+# D’fortees Court Booking Platform
 
-An isolated, rebranded court-booking system for D'fortees Pickleball Court. It includes public court booking, Open Play, host accounts, payment review, receipt verification, administrative reporting, and court-owner operations.
+This repository contains the D’fortees frontend plus a clean multi-tenant
+Supabase platform designed to serve independently branded pickleball venues.
+The first tenant is `dfortees`; additional venues receive their own tenant,
+domain, staff, courts, pricing, bookings, payments, files, and Cloudflare site.
 
-## Isolation guarantee
+## Isolation and safety
 
-- This repository has a fresh Git history and no remote by default.
-- The frontend contains no working Supabase URL or key.
-- When the backend is not configured, outbound database requests are blocked and local demo data is used automatically.
-- Deployment scripts require `DEPLOYMENT_BRAND=dfortees` and reject missing or legacy targets.
-- The read-only source snapshot is excluded from Git and deployment.
+- The current frontend defaults to `https://dfortees-backend.invalid` and local
+  browser data until `/runtime-config.js` supplies the new public connection.
+- The canonical database and Edge Functions live under `platform/supabase/`.
+- The historical root `supabase/` directory is legacy reference only. Its
+  single-tenant migrations and functions are not deployed by any active script.
+- Guest booking uses RPCs; anonymous users cannot query booking rows or PII.
+- Database passwords, service-role keys, personal access tokens, and Cloudflare
+  tokens belong only in the ignored `.env.local` or provider secret stores.
+- GitHub and Supabase GitHub integration are not required.
 
 ## Local preview
 
-Serve the repository with any static web server. For example:
-
 ```powershell
-python -m http.server 4173 --bind 127.0.0.1
+npm install
+npm run dev
 ```
 
-Then open `http://127.0.0.1:4173/`. Local demo mode stores temporary data in that browser only and never contacts Supabase.
+Open `http://127.0.0.1:4173/`. With no `.env.local`, this is an isolated browser
+demo and makes no Supabase requests. To test the verified development backend,
+copy `.env.local.example` to `.env.local` and add only the project’s public URL,
+publishable key, and tenant slug. Never put the service-role key in frontend
+configuration.
 
-Demo owner credentials for testing the login screen:
+## Canonical platform
 
-- Email: `owner@dfortees.local`
-- Password: `dev123`
+The migrations in `platform/supabase/migrations/` create:
 
-These demo credentials are ignored as soon as a real D'fortees backend is configured.
+- tenants, domains, profiles, platform admins, and tenant memberships;
+- tenant-scoped courts, rates, bookings, slot locks, Open Play, payments,
+  receipts, remittances, agreements, notifications, and audit records;
+- RLS on every application table and private tenant-prefixed storage;
+- server-priced, idempotent guest booking with atomic duplicate prevention;
+- public tenant/availability RPCs and token-protected guest booking status.
+
+The D’fortees seed contains one outdoor court, ₱60/hour from 6 AM–6 PM and
+₱90/hour from 6 PM–midnight. It contains no demo bookings, fake payments,
+placeholder courts, or test accounts.
 
 ## Verification
 
 ```powershell
+npm run check
+npm test
 npm run verify
+npm run build:pages
 ```
 
-Verification checks JavaScript syntax, booking-balance behavior, missing local assets, legacy Korte identifiers, live Supabase URLs, JWT-shaped keys, and Git remotes.
+Remote acceptance results are recorded in `platform/VERIFICATION.md`.
 
-## New Supabase project
+## Deployment status
 
-Never reuse an existing court's project. Create a new D'fortees Supabase project, then generate the reviewed fresh-install SQL bundle:
+The new development project is intentionally not connected to the live
+Cloudflare site. The Free project must be upgraded before production bookings;
+production also requires final mobile/desktop integration tests, Auth redirect
+URLs, and Cloudflare runtime variables.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File tools/build-fresh-database-bundle.ps1 `
-  -SupabaseProjectUrl https://YOUR-NEW-PROJECT.supabase.co
-```
-
-Review `.generated/dfortees-fresh-database.sql`, apply it only to the empty D'fortees project, and verify RLS with anon, host, staff, court-owner, and owner accounts before production use.
-
-Replace the two disabled constants at the top of `supabase-config.js` only with the new D'fortees Project URL and browser publishable key. Server, payment, email, OCR, and notification secrets belong in Supabase Edge Function secrets—not in source code.
-
-## Deployment
-
-For Cloudflare Pages Git deployments, use `npm run build:pages` as the build command and `dist` as the output directory. The build includes only public runtime assets.
-
-Copy `.env.example` to `.env.local` and fill it with D'fortees-only targets. A production deployment requires the new D'fortees backend. A temporary browser-only demo may be deployed explicitly with `powershell -ExecutionPolicy Bypass -File deploy-cloudflare-pages.ps1 -AllowDemoMode`; visitor data then stays only in each browser. Database migrations are never pushed automatically; `deploy-edge-functions.ps1 -ApplyMigrations` must be chosen explicitly.
-
-Do not publish `SETUP_NEW_SUPABASE.sql`, setup scripts, documentation, source snapshots, or local credentials. The Cloudflare deployment script packages only the runtime files.
+`deploy-edge-functions.ps1` deploys only the tenant-aware platform functions and
+is hard-locked to the isolated development project. The Cloudflare deployment
+script blocks the Free development backend unless an explicit development
+preview flag is supplied.

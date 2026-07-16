@@ -6,6 +6,22 @@ const host = '127.0.0.1';
 const port = Number(process.env.PORT || 4173);
 const root = path.resolve(__dirname, '..');
 
+function loadLocalEnvironment() {
+  const localPath = path.join(root, '.env.local');
+  if (!fs.existsSync(localPath)) return;
+  const lines = fs.readFileSync(localPath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match || process.env[match[1]] !== undefined) continue;
+    const value = match[2].replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, (_, doubleQuoted, singleQuoted) =>
+      doubleQuoted ?? singleQuoted
+    );
+    process.env[match[1]] = value;
+  }
+}
+
+loadLocalEnvironment();
+
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -24,6 +40,26 @@ const server = http.createServer((request, response) => {
   } catch {
     response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
     response.end('Bad request');
+    return;
+  }
+
+  if (pathname === '/runtime-config.js') {
+    const tenantSlug = /^[a-z0-9][a-z0-9-]{1,62}$/.test(process.env.PB_TENANT_SLUG || '')
+      ? process.env.PB_TENANT_SLUG
+      : 'dfortees';
+    const config = {
+      supabaseUrl: process.env.PB_SUPABASE_URL || 'https://dfortees-backend.invalid',
+      supabasePublishableKey:
+        process.env.PB_SUPABASE_PUBLISHABLE_KEY || 'DFORTEES_SUPABASE_PUBLISHABLE_KEY_NOT_CONFIGURED',
+      tenantSlug,
+    };
+    const body = `window.PB_RUNTIME_CONFIG = Object.freeze(${JSON.stringify(config).replaceAll('<', '\\u003c')});\n`;
+    response.writeHead(200, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    response.end(body);
     return;
   }
 

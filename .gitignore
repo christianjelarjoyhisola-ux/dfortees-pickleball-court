@@ -5,6 +5,8 @@ resendAPIKEY.txt
 .env
 .env.local
 .env*.local
+.dev.vars
+.dev.vars.*
 
 # Supabase local temp files
 supabase/.temp/
