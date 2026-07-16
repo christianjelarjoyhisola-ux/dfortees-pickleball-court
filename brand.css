@@ -650,7 +650,11 @@ textarea:focus {
     border-radius: 16px;
   }
 
-  .welcome-contact-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .welcome-contact-links {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
   .welcome-contact-link { justify-content: center; min-width: 0; padding: 7px; }
   .welcome-contact-link small { white-space: nowrap; }
 
