@@ -214,12 +214,6 @@ body[data-theme="dark"] {
   justify-content: flex-end;
   width: fit-content;
   margin: -2px 32px 24px auto;
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, .14);
-  border-radius: 18px;
-  background: rgba(2, 28, 17, .46);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 12px 28px rgba(0,0,0,.16);
-  backdrop-filter: blur(16px) saturate(1.18);
 }
 
 .welcome-contact-links,
@@ -240,7 +234,9 @@ body[data-theme="dark"] {
   border-radius: 13px;
   color: #fff;
   text-decoration: none;
-  background: rgba(255,255,255,.07);
+  background: rgba(2, 28, 17, .58);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 20px rgba(0,0,0,.14);
+  backdrop-filter: blur(13px) saturate(1.16);
   transition: transform .18s ease, border-color .18s ease, background .18s ease, box-shadow .18s ease;
 }
 
@@ -256,7 +252,7 @@ body[data-theme="dark"] {
 
 .welcome-contact-link--call {
   border-color: rgba(242,214,75,.34);
-  background: rgba(242,214,75,.10);
+  background: linear-gradient(135deg, rgba(242,214,75,.16), rgba(2,28,17,.60));
 }
 
 .welcome-contact-icon {
@@ -645,9 +641,7 @@ textarea:focus {
 
   .welcome-contact-bar {
     width: auto;
-    margin: -4px 12px 12px;
-    padding: 11px;
-    border-radius: 16px;
+    margin: -4px 18px 18px;
   }
 
   .welcome-contact-links {
@@ -710,7 +704,7 @@ textarea:focus {
   .welcome-hero .booking-hero-copy { font-size: .84rem; }
   .welcome-hero .hero-primary,
   .welcome-hero .hero-secondary { min-height: 48px; }
-  .welcome-contact-bar { margin: -4px 9px 9px; padding: 9px; }
+  .welcome-contact-bar { margin: -4px 15px 12px; }
   .welcome-contact-link { min-height: 42px; }
 }
 
