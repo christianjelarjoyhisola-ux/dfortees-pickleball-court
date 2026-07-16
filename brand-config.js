@@ -5,7 +5,7 @@ window.DFORTEES_BRAND = Object.freeze({
   name: "D'fortees Pickleball Court",
   shortName: "D'fortees",
   wordmark: "D’FORTEES",
-  mark: "D'F",
+  logo: 'logodfortees.jpg',
   tagline: 'Play bold. Book easy.',
   location: 'Montevista, Davao de Oro',
   address: 'Prk-4 National Highway, 8801 Montevista',
@@ -18,6 +18,7 @@ window.DFORTEES_BRAND = Object.freeze({
 
 document.addEventListener('DOMContentLoaded', () => {
   const brand = window.DFORTEES_BRAND;
+  document.querySelectorAll('[data-brand-logo]').forEach((node) => { node.setAttribute('src', brand.logo); });
   document.querySelectorAll('[data-brand-name]').forEach((node) => { node.textContent = brand.name; });
   document.querySelectorAll('[data-brand-short]').forEach((node) => { node.textContent = brand.shortName; });
   document.querySelectorAll('[data-brand-wordmark]').forEach((node) => { node.textContent = brand.wordmark; });

@@ -4,6 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
 <title>D’fortees Pickleball Court — Admin Dashboard</title>
+<link rel="icon" type="image/jpeg" href="logodfortees.jpg" />
 <script src="chart.min.js"></script>
 <script src="booking-balance.js?v=20260716-host-balance-v1"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -133,8 +134,8 @@ h1, h2, h3, h4 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
 }
 .nav-brand .brand-accent { color: var(--green); }
 .logo-img {
-  width: 38px; height: 38px; border-radius: 50%; object-fit: contain;
-  background: #fff; padding: 2px;
+  width: 38px; height: 38px; border-radius: 10px; object-fit: contain;
+  background: #fff; padding: 0;
   border: 1.5px solid var(--border); flex-shrink: 0;
   transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -2050,7 +2051,7 @@ tr:hover td { background: var(--bg2); }
 <!-- TOP NAV -->
 <nav class="topnav">
   <div class="nav-brand" onclick="window.location.href='index.html'">
-    <span class="brand-mark logo-img" role="img" aria-label="D’fortees Pickleball Court logo">D'F</span>
+    <img class="logo-img" src="logodfortees.jpg" data-brand-logo alt="D’fortees Pickleball Court logo" />
     D’fortees Pickleball Court <span class="brand-accent">Admin</span>
   </div>
   <div class="nav-actions">
