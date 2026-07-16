@@ -50,6 +50,8 @@ Replace the two disabled constants at the top of `supabase-config.js` only with 
 
 ## Deployment
 
+For Cloudflare Pages Git deployments, use `npm run build:pages` as the build command and `dist` as the output directory. The build includes only public runtime assets.
+
 Copy `.env.example` to `.env.local` and fill it with D'fortees-only targets. A production deployment requires the new D'fortees backend. A temporary browser-only demo may be deployed explicitly with `powershell -ExecutionPolicy Bypass -File deploy-cloudflare-pages.ps1 -AllowDemoMode`; visitor data then stays only in each browser. Database migrations are never pushed automatically; `deploy-edge-functions.ps1 -ApplyMigrations` must be chosen explicitly.
 
 Do not publish `SETUP_NEW_SUPABASE.sql`, setup scripts, documentation, source snapshots, or local credentials. The Cloudflare deployment script packages only the runtime files.

@@ -4,6 +4,7 @@
   "private": true,
   "description": "D'fortees Pickleball Court booking, host, and administration system",
   "scripts": {
+    "build:pages": "node tools/build-pages.js",
     "dev": "node tools/local-server.js",
     "test": "node --test booking-balance.test.js",
     "check": "node --check booking-balance.js && node --check brand-config.js && node --check supabase-config.js && node --check _worker.js && node --check create-accounts.js && node --check setup-db.js",

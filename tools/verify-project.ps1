@@ -60,10 +60,18 @@ try {
   }
   if ($missingAssets.Count -gt 0) { throw "Missing local assets: $([string]::Join(', ', $missingAssets))" }
 
-  $remotes = & git remote
-  if ($remotes) { throw "A Git remote exists. Review it before continuing: $($remotes -join ', ')" }
+  $expectedRemote = 'https://github.com/christianjelarjoyhisola-ux/dfortees-pickleball-court.git'
+  $remotes = @(& git remote)
+  foreach ($remote in $remotes) {
+    $remoteUrls = @(& git remote get-url --all $remote)
+    foreach ($remoteUrl in $remoteUrls) {
+      if ($remote -ne 'origin' -or $remoteUrl -ne $expectedRemote) {
+        throw "Unexpected Git remote detected: $remote -> $remoteUrl"
+      }
+    }
+  }
 
-  Write-Host "D'fortees verification passed. No live Korte connection or missing runtime asset was detected."
+  Write-Host "D'fortees verification passed. No live Korte or Supabase connection, unexpected Git remote, or missing runtime asset was detected."
 } finally {
   Pop-Location
 }
