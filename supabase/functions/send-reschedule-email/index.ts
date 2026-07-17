@@ -1,4 +1,5 @@
 import { HttpError, jsonError, resolveBookingAccess } from "../_shared/notification-auth.ts";
+import { assertEmailProviderConfigured, sendTransactionalEmail } from "../_shared/email-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -144,8 +145,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
   try {
-    const resendKey = Deno.env.get("RESEND_API_KEY") || "";
-    if (!resendKey) throw new Error("RESEND_API_KEY is not configured");
+    assertEmailProviderConfigured();
 
     const requestBody = (await req.json().catch(() => ({}))) as RequestPayload;
     const access = await resolveBookingAccess(req, requestBody as Record<string, unknown>, { adminOnly: true });
@@ -166,26 +166,14 @@ Deno.serve(async (req) => {
       note: String(requestBody.note || "").trim().slice(0, 600),
     };
 
-    const fromAddress = Deno.env.get("EMAIL_FROM") || "D’FORTEES <onboarding@resend.dev>";
-
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: fromAddress,
-        to: [body.email],
-        subject: `Booking Rescheduled - ${body.bookingRef} | D’FORTEES`,
-        html: buildHtml(body),
-      }),
+    const delivery = await sendTransactionalEmail({
+      to: body.email,
+      subject: `Booking Rescheduled - ${body.bookingRef} | D'FORTEES`,
+      html: buildHtml(body),
+      tags: { event: "booking_rescheduled" },
     });
 
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Resend error ${res.status}: ${JSON.stringify(json)}`);
-
-    return new Response(JSON.stringify({ ok: true, id: json.id }), {
+    return new Response(JSON.stringify({ ok: true, id: delivery.id, provider: delivery.provider }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

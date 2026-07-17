@@ -2678,7 +2678,7 @@ window.DB = {
         ok: true,
         local: true,
         services: [
-          { id: 'email', label: 'Email confirmations', configured: false, required: ['RESEND_API_KEY'], missing: ['RESEND_API_KEY'], note: 'Local data mode' },
+          { id: 'email', label: 'Maileroo email delivery', configured: false, required: ['EMAIL_PROVIDER', 'MAILEROO_API_KEY', 'MAILEROO_FROM_EMAIL'], missing: ['EMAIL_PROVIDER', 'MAILEROO_API_KEY', 'MAILEROO_FROM_EMAIL'], note: 'Local data mode' },
           { id: 'telegram', label: 'Telegram admin alerts', configured: false, required: ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'], missing: ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'], note: 'Local data mode' },
           { id: 'payments', label: 'PayMongo checkout', configured: false, required: ['PAYMONGO_SECRET_KEY', 'PAYMENT_SUCCESS_URL', 'PAYMENT_CANCEL_URL'], missing: ['PAYMONGO_SECRET_KEY', 'PAYMENT_SUCCESS_URL', 'PAYMENT_CANCEL_URL'], note: 'Local data mode' },
           { id: 'ocr', label: 'Receipt OCR', configured: false, required: ['GOOGLE_VISION_API_KEY'], missing: ['GOOGLE_VISION_API_KEY'], note: 'Local data mode' },

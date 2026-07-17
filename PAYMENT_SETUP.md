@@ -57,7 +57,11 @@ provider-native PayMongo signature verification path.
    `SUPABASE_SERVICE_ROLE_KEY` to functions; never expose the latter publicly.
 4. Set only the secrets needed by the optional feature being enabled:
 
-   - Email: `RESEND_API_KEY`, `EMAIL_FROM`, and optionally `PUBLIC_LOGO_URL`
+   - Email: `EMAIL_PROVIDER=maileroo`, `MAILEROO_API_KEY`,
+     `MAILEROO_FROM_EMAIL`, and optionally `MAILEROO_FROM_NAME` and
+     `PUBLIC_LOGO_URL`. The sender must use a verified Maileroo domain. The
+     default sandbox is only for authorized test recipients and must not be
+     used for customer bookings.
    - Telegram: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `APP_ADMIN_URL`
    - Scheduled balance processing: `HOST_BALANCE_CRON_SECRET` plus the email
      secrets when email reminders are required

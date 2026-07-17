@@ -5,6 +5,7 @@ import {
   jsonError,
   requireActiveAdmin,
 } from "../_shared/notification-auth.ts";
+import { assertEmailProviderConfigured, sendTransactionalEmail } from "../_shared/email-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -121,7 +122,7 @@ function emailHtml(info: ReturnType<typeof summary>, eventType: string): string 
   </table></td></tr></table></body></html>`;
 }
 
-async function sendNotice(db: any, resendKey: string, rows: BookingRow[], eventType: string, force = false) {
+async function sendNotice(db: any, rows: BookingRow[], eventType: string, force = false) {
   const info = summary(rows);
   if (!info.email || !info.deadline || info.balance <= 0) return { skipped: true, reason: "No recipient or balance" };
 
@@ -144,17 +145,13 @@ async function sendNotice(db: any, resendKey: string, rows: BookingRow[], eventT
 
   const copy = noticeCopy(eventType, info.balance, info.deadline);
   try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: Deno.env.get("EMAIL_FROM") || "D’FORTEES <onboarding@resend.dev>",
-        to: [info.email], subject: `${copy.subject} | D’FORTEES`, html: emailHtml(info, eventType),
-      }),
+    const delivery = await sendTransactionalEmail({
+      to: info.email,
+      subject: `${copy.subject} | D'FORTEES`,
+      html: emailHtml(info, eventType),
+      tags: { event: eventType },
     });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`Resend error ${response.status}: ${JSON.stringify(result)}`);
-    await db.from("booking_balance_notifications").update({ status: "sent", sent_at: new Date().toISOString(), provider_message_id: result.id || null }).eq("id", claimed.id);
+    await db.from("booking_balance_notifications").update({ status: "sent", sent_at: new Date().toISOString(), provider_message_id: delivery.id }).eq("id", claimed.id);
     return { sent: true, eventType, bookingKey: info.key };
   } catch (error) {
     await db.from("booking_balance_notifications").update({ status: "failed", error_message: error instanceof Error ? error.message : String(error) }).eq("id", claimed.id);
@@ -166,8 +163,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   try {
-    const resendKey = Deno.env.get("RESEND_API_KEY") || "";
-    if (!resendKey) throw new HttpError(503, "Balance notification email is not configured");
+    assertEmailProviderConfigured();
     const db = createServiceClient();
     const body = await req.json().catch(() => ({}));
 
@@ -185,7 +181,7 @@ Deno.serve(async (req) => {
         throw new HttpError(400, "Invalid balance notification event");
       }
       const eventType = manualRows.some((row: BookingRow) => row.status === "forfeited") ? "forfeited" : requestedEvent;
-      const result = await sendNotice(db, resendKey, manualRows as BookingRow[], eventType, true);
+      const result = await sendNotice(db, manualRows as BookingRow[], eventType, true);
       return new Response(JSON.stringify({ ok: true, result }), { headers: JSON_HEADERS });
     }
 
@@ -205,10 +201,10 @@ Deno.serve(async (req) => {
       if (remaining <= 0) {
         const { data: forfeiture, error: forfeitError } = await db.rpc("forfeit_overdue_host_booking", { p_booking_key: info.key });
         if (forfeitError) throw forfeitError;
-        if (Number(forfeiture?.changed || 0) > 0) results.push(await sendNotice(db, resendKey, rows, "forfeited"));
-      } else if (remaining <= DAY_MS) results.push(await sendNotice(db, resendKey, rows, "reminder_1d"));
-      else if (remaining <= 2 * DAY_MS) results.push(await sendNotice(db, resendKey, rows, "reminder_2d"));
-      else if (remaining <= 3 * DAY_MS) results.push(await sendNotice(db, resendKey, rows, "reminder_3d"));
+        if (Number(forfeiture?.changed || 0) > 0) results.push(await sendNotice(db, rows, "forfeited"));
+      } else if (remaining <= DAY_MS) results.push(await sendNotice(db, rows, "reminder_1d"));
+      else if (remaining <= 2 * DAY_MS) results.push(await sendNotice(db, rows, "reminder_2d"));
+      else if (remaining <= 3 * DAY_MS) results.push(await sendNotice(db, rows, "reminder_3d"));
     }
 
     // A status change must not suppress a forfeiture email retry. Failed logs
@@ -218,7 +214,7 @@ Deno.serve(async (req) => {
       .not("balance_due_at", "is", null);
     if (forfeitedError) throw forfeitedError;
     for (const rows of groupRows((forfeitedData || []) as BookingRow[])) {
-      results.push(await sendNotice(db, resendKey, rows, "forfeited"));
+      results.push(await sendNotice(db, rows, "forfeited"));
     }
     return new Response(JSON.stringify({ ok: true, processed: results.length, results }), { headers: JSON_HEADERS });
   } catch (error) {

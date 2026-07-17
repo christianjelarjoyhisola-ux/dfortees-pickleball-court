@@ -1,5 +1,6 @@
 import { HttpError, jsonError, resolveBookingAccess } from "../_shared/notification-auth.ts";
 import type { BookingRow } from "../_shared/notification-auth.ts";
+import { assertEmailProviderConfigured, sendTransactionalEmail } from "../_shared/email-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -261,8 +262,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
   try {
-    const resendKey = Deno.env.get("RESEND_API_KEY") || "";
-    if (!resendKey) throw new Error("RESEND_API_KEY is not configured");
+    assertEmailProviderConfigured();
 
     const requestBody = (await req.json().catch(() => ({}))) as RequestPayload;
     const access = await resolveBookingAccess(req, requestBody as Record<string, unknown>);
@@ -288,34 +288,22 @@ Deno.serve(async (req) => {
       });
     }
 
-    const fromAddress = Deno.env.get("EMAIL_FROM") || "D’FORTEES <onboarding@resend.dev>";
-
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: fromAddress,
-        to: [body.email],
-        subject: `Booking Confirmed - ${body.bookingRef} | D’FORTEES`,
-        html: buildHtml(body),
-      }),
+    const delivery = await sendTransactionalEmail({
+      to: body.email,
+      subject: `Booking Confirmed - ${body.bookingRef} | D'FORTEES`,
+      html: buildHtml(body),
+      tags: { event: "booking_confirmation" },
     });
-
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Resend error ${res.status}: ${JSON.stringify(json)}`);
 
     const refs = access.rows.map((row) => row.ref);
     const { error: trackingError } = await access.db.from("bookings").update({
-      confirmation_email_id: json.id || null,
+      confirmation_email_id: delivery.id,
       confirmation_email_sent_at: new Date().toISOString(),
       confirmation_email_last_event: access.isAdmin ? "admin_resend" : "guest_delivery",
     }).in("ref", refs);
     if (trackingError) console.error("Unable to update confirmation email tracking", trackingError);
 
-    return new Response(JSON.stringify({ ok: true, id: json.id }), {
+    return new Response(JSON.stringify({ ok: true, id: delivery.id, provider: delivery.provider }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

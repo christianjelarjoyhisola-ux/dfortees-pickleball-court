@@ -67,7 +67,13 @@ Deno.serve(async (req) => {
 
   const serviceRoleConfigured = hasEnv("SERVICE_ROLE_KEY") || hasEnv("SUPABASE_SERVICE_ROLE_KEY");
   const services: ServiceStatus[] = [
-    service("email", "Email confirmations", ["RESEND_API_KEY"], ["EMAIL_FROM"]),
+    service(
+      "email",
+      "Maileroo email delivery",
+      ["EMAIL_PROVIDER", "MAILEROO_API_KEY", "MAILEROO_FROM_EMAIL"],
+      ["MAILEROO_FROM_NAME", "PUBLIC_LOGO_URL"],
+      "EMAIL_PROVIDER must be maileroo and the sending domain must be verified.",
+    ),
     service("telegram", "Telegram admin alerts", ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"], ["APP_ADMIN_URL"]),
     service("payments", "PayMongo checkout", ["PAYMONGO_SECRET_KEY", "PAYMENT_SUCCESS_URL", "PAYMENT_CANCEL_URL"], ["PAYMENT_WEBHOOK_SECRET"]),
     receiptOcrService(),
