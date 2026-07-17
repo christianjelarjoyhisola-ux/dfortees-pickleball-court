@@ -1,3 +1,6 @@
+import { HttpError, jsonError, resolveBookingAccess } from "../_shared/notification-auth.ts";
+import type { BookingRow } from "../_shared/notification-auth.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -29,6 +32,11 @@ type Payload = {
     total: number;
     downpayment?: number;
   }>;
+};
+
+type RequestPayload = {
+  bookingRef?: string;
+  guestAccessToken?: string;
 };
 
 function escapeHtml(value: unknown): string {
@@ -213,6 +221,40 @@ function buildHtml(p: Payload): string {
 </html>`;
 }
 
+function payloadFromRows(rows: BookingRow[]): Payload {
+  const first = rows[0];
+  const total = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const downpayment = rows.reduce((sum, row) => sum + Number(row.downpayment || 0), 0);
+  const duration = rows.reduce((sum, row) => sum + Number(row.duration || 0), 0);
+  const bookingItems = rows.map((row) => ({
+    courtName: row.court_name,
+    date: row.date,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    duration: Number(row.duration || 0),
+    total: Number(row.total || 0),
+    downpayment: Number(row.downpayment || 0),
+  }));
+
+  return {
+    bookingRef: first.booking_group_ref || first.ref,
+    email: first.email,
+    fullName: first.full_name,
+    courtName: [...new Set(rows.map((row) => row.court_name).filter(Boolean))].join(", "),
+    date: first.date,
+    startTime: first.start_time,
+    endTime: first.end_time,
+    duration,
+    total,
+    downpayment,
+    hostBooking: rows.some((row) => row.host_booking),
+    balanceDueAt: rows.map((row) => row.balance_due_at).filter(Boolean).sort()[0] || null,
+    remainingBalance: Math.max(0, total - downpayment),
+    contactNumber: first.contact_number,
+    bookingItems,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
@@ -221,10 +263,26 @@ Deno.serve(async (req) => {
     const resendKey = Deno.env.get("RESEND_API_KEY") || "";
     if (!resendKey) throw new Error("RESEND_API_KEY is not configured");
 
-    const body = (await req.json()) as Payload;
-    if (!body.email || !body.bookingRef) {
-      return new Response(JSON.stringify({ error: "Missing email or bookingRef" }), {
-        status: 400,
+    const requestBody = (await req.json().catch(() => ({}))) as RequestPayload;
+    const access = await resolveBookingAccess(req, requestBody as Record<string, unknown>);
+    if (access.rows.some((row) => row.status !== "confirmed")) {
+      throw new HttpError(409, "A confirmation email can only be sent for a confirmed booking");
+    }
+
+    const body = payloadFromRows(access.rows);
+    if (!body.email) throw new HttpError(409, "This booking does not have an email address");
+
+    // A guest may trigger the first delivery after verification, but cannot use
+    // the endpoint as an email-spam relay. Dashboard administrators retain an
+    // explicit resend action.
+    const lastSentAt = access.rows
+      .map((row) => row.confirmation_email_sent_at)
+      .filter(Boolean)
+      .map((value) => new Date(value!).getTime())
+      .sort((a, b) => b - a)[0] || 0;
+    if (!access.isAdmin && lastSentAt && Date.now() - lastSentAt < 10 * 60_000) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: "Confirmation was already sent" }), {
+        status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -248,15 +306,19 @@ Deno.serve(async (req) => {
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`Resend error ${res.status}: ${JSON.stringify(json)}`);
 
+    const refs = access.rows.map((row) => row.ref);
+    const { error: trackingError } = await access.db.from("bookings").update({
+      confirmation_email_id: json.id || null,
+      confirmation_email_sent_at: new Date().toISOString(),
+      confirmation_email_last_event: access.isAdmin ? "admin_resend" : "guest_delivery",
+    }).in("ref", refs);
+    if (trackingError) console.error("Unable to update confirmation email tracking", trackingError);
+
     return new Response(JSON.stringify({ ok: true, id: json.id }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonError(err, corsHeaders);
   }
 });

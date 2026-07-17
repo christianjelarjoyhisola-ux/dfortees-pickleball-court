@@ -24,6 +24,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Image } from "https://deno.land/x/imagescript@1.2.17/mod.ts";
 import { calculateCourtPayment, chooseExpectedDue, closeMoney, roundMoney, toNumber } from "../_shared/booking-payment.ts";
 import { extractReceiptAmount } from "../_shared/receipt-amount.ts";
+import {
+  authorizeBookingRequest,
+  getActiveAdmin,
+} from "../_shared/request-authorization.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,6 +43,8 @@ const PAYMENT_EARLY_TOLERANCE_MINUTES = 2;
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+const RECEIPT_ATTEMPT_LIMIT = 5;
+const RECEIPT_ATTEMPT_WINDOW_SECONDS = 10 * 60;
 const PESO_TOLERANCE = 5; // allow ±₱5 rounding; underpay beyond this is a hard flag
 
 // Hard flags force a rejection; soft flags force manual review.
@@ -106,10 +112,18 @@ function publicReceiptMessage(
   return "Payment details do not match this booking. Please check your receipt and try again, or contact admin.";
 }
 
-function json(body: unknown, status = 200) {
+function json(
+  body: unknown,
+  status = 200,
+  extraHeaders: Record<string, string> = {},
+) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+      ...extraHeaders,
+    },
   });
 }
 
@@ -125,6 +139,41 @@ function errMsg(err: unknown): string {
   } catch {
     return "Unknown error";
   }
+}
+
+type ReceiptAttemptClaim = {
+  allowed: boolean;
+  attemptsRemaining: number;
+  retryAfterSeconds: number;
+};
+
+async function claimReceiptAttempt(
+  db: any,
+  bookingKey: string,
+): Promise<ReceiptAttemptClaim> {
+  const { data, error } = await db.rpc("claim_receipt_verification_attempt", {
+    p_booking_ref: bookingKey,
+    p_max_attempts: RECEIPT_ATTEMPT_LIMIT,
+    p_window_seconds: RECEIPT_ATTEMPT_WINDOW_SECONDS,
+  });
+  if (error) throw error;
+
+  const claim = Array.isArray(data) ? data[0] : data;
+  if (!claim || typeof claim.allowed !== "boolean") {
+    throw new Error("Receipt attempt limiter returned an invalid response");
+  }
+
+  return {
+    allowed: claim.allowed,
+    attemptsRemaining: Math.max(
+      0,
+      Number(claim.attemptsRemaining ?? claim.attempts_remaining ?? 0),
+    ),
+    retryAfterSeconds: Math.max(
+      0,
+      Number(claim.retryAfterSeconds ?? claim.retry_after_seconds ?? 0),
+    ),
+  };
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -866,10 +915,13 @@ async function googleVisionOCR(
   let res: Response;
   try {
     res = await fetch(
-      `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
+      "https://vision.googleapis.com/v1/images:annotate",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify({
           requests: [{
             image: { content },
@@ -1023,6 +1075,7 @@ Deno.serve(async (req) => {
       body = {
         action: String(form.get("action") || "verify"),
         bookingRef: String(form.get("bookingRef") || ""),
+        guestAccessToken: String(form.get("guestAccessToken") || ""),
         provider: String(form.get("provider") || "gcash"),
         contentType: uploadedImage?.type || String(form.get("contentType") || "image/jpeg"),
         ...(bookingData ? { bookingData } : {}),
@@ -1048,15 +1101,16 @@ Deno.serve(async (req) => {
       }, 400);
     }
 
-    // Require a real signed-in user (anon key alone is rejected).
-    const authHeader = req.headers.get("Authorization") || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "");
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-    const { data: userData } = await userClient.auth.getUser();
-    if (!userData?.user) return json({ error: "Unauthorized" }, 401);
+    // A JWT alone is insufficient: the user must also have an active
+    // owner/court-owner/staff account in this booking system.
+    let admin;
+    try {
+      admin = await getActiveAdmin(req, db);
+    } catch (error) {
+      console.error("receipt signing authorization failed", error);
+      return json({ error: "Authorization could not be verified" }, 500);
+    }
+    if (!admin) return json({ error: "Admin access required" }, 403);
 
     let path: string | null = null;
     if (hostSessionRegistrationId) {
@@ -1114,7 +1168,7 @@ Deno.serve(async (req) => {
     const { data: persistedRow, error: bookingErr } = await db
       .from("bookings")
       .select(
-        "ref, booking_group_ref, court_id, slots, total, downpayment, host_booking, gcash_ref, payment_method, date, payment_status, status, full_name, created_at, receipt_image_url, receipt_image_hash, receipt_phash, receipt_status, receipt_flags, receipt_extracted, receipt_confidence, receipt_verified_at",
+        "ref, booking_group_ref, court_id, slots, total, downpayment, host_booking, gcash_ref, payment_method, date, payment_status, status, full_name, created_at, receipt_image_url, receipt_image_hash, receipt_phash, receipt_status, receipt_flags, receipt_extracted, receipt_confidence, receipt_verified_at, guest_access_token",
       )
       .eq("ref", bookingRef)
       .maybeSingle();
@@ -1124,7 +1178,17 @@ Deno.serve(async (req) => {
     let inlinePricingKind: "open_play" | "host_session" | null = null;
     const hasPersistedBooking = !!persistedRow;
     if (persistedRow) {
+      const authorization = await authorizeBookingRequest({
+        req,
+        db,
+        bookingRef,
+        guestAccessToken: body.guestAccessToken,
+      });
+      if (!authorization.ok) {
+        return json({ error: authorization.error }, authorization.status);
+      }
       booking = { ...(persistedRow as Record<string, unknown>) };
+      delete booking.guest_access_token;
       const persistedStatus = String(booking.status || "");
       const persistedPaymentStatus = String(booking.payment_status || "");
       const terminal = ["confirmed", "cancelled", "completed"].includes(persistedStatus) ||
@@ -1159,6 +1223,17 @@ Deno.serve(async (req) => {
         booking.date = inlineBookingData.date;
       }
     } else {
+      // Inline Open Play verification has no persisted booking ownership token.
+      // Retain the workflow for active administrators, but never allow an
+      // anonymous caller to authorize itself with client-supplied bookingData.
+      let admin;
+      try {
+        admin = await getActiveAdmin(req, db);
+      } catch (error) {
+        console.error("inline receipt authorization failed", error);
+        return json({ error: "Authorization could not be verified" }, 500);
+      }
+      if (!admin) return json({ error: "Booking access denied" }, 403);
       if (!inlineBookingData) return json({ error: "Booking not found" }, 404);
       const hasCourtShape = !!(
         inlineBookingData.court_id ||
@@ -1185,6 +1260,30 @@ Deno.serve(async (req) => {
     // mobile screenshots can make those later steps slow or memory-heavy; a
     // disconnect there must never leave the owner without the paid receipt.
     const imageHash = await sha256Hex(bytes);
+    const receiptAttemptKey = String(
+      booking.booking_group_ref || booking.groupRef || bookingRef,
+    );
+    let attemptClaim: ReceiptAttemptClaim;
+    try {
+      attemptClaim = await claimReceiptAttempt(db, receiptAttemptKey);
+    } catch (error) {
+      console.error("receipt attempt limiter failed:", errMsg(error));
+      // Fail closed. Continuing without a claim would let an attacker spend
+      // the project's Vision quota whenever the limiter is unavailable.
+      return json({
+        error: "Receipt verification is temporarily unavailable. Please try again shortly.",
+        code: "RECEIPT_LIMITER_UNAVAILABLE",
+      }, 503);
+    }
+    if (!attemptClaim.allowed) {
+      const retryAfterSeconds = Math.max(1, attemptClaim.retryAfterSeconds);
+      return json({
+        error: "Too many receipt attempts. Please wait before trying again.",
+        code: "RECEIPT_RATE_LIMITED",
+        retryAfterSeconds,
+      }, 429, { "Retry-After": String(retryAfterSeconds) });
+    }
+
     const ext = contentType.includes("png") ? "png" :
       contentType.includes("webp") ? "webp" :
       contentType.includes("heic") || contentType.includes("heif") ? "heic" : "jpg";
@@ -1640,7 +1739,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const confidence = result === "auto_approved" ? Math.max(0.9, ocrConfidence) : result === "manual_review" ? 0.5 : 0.1;
+    let confidence = result === "auto_approved" ? Math.max(0.9, ocrConfidence) : result === "manual_review" ? 0.5 : 0.1;
 
     const extracted = {
       ref: extractedRef,
@@ -1727,20 +1826,50 @@ Deno.serve(async (req) => {
         .in("status", ["verifying", "pending"])
         .select("ref, status, payment_status");
       if (updateErr) {
-        finalUpdateError = errMsg(updateErr);
+        finalUpdateError = errMsg(updateErr) || "Unknown final update error";
         console.error("booking FINAL update failed:", finalUpdateError);
       } else if (!updatedRows || updatedRows.length === 0) {
         // A zero-row CAS commonly means a concurrent request already finalized
         // the booking. Confirm that before reporting a persistence failure.
-        const { data: currentRow } = await db.from("bookings")
-          .select("status, payment_status")
+        const { data: currentRow, error: currentRowErr } = await db.from("bookings")
+          .select("status, payment_status, receipt_status")
           .eq("ref", bookingRef)
           .maybeSingle();
-        const currentStatus = String(currentRow?.status || "");
-        const currentPayment = String(currentRow?.payment_status || "");
-        const concurrentlyFinalized = ["confirmed", "cancelled", "completed"].includes(currentStatus) ||
-          ["paid", "downpayment_paid", "rejected"].includes(currentPayment);
-        if (!concurrentlyFinalized) {
+        if (currentRowErr) {
+          finalUpdateError = errMsg(currentRowErr) ||
+            "Unknown final state reload error";
+          console.error("booking FINAL state reload failed:", finalUpdateError);
+        } else {
+          const currentStatus = String(currentRow?.status || "");
+          const currentPayment = String(currentRow?.payment_status || "");
+          const currentReceipt = String(currentRow?.receipt_status || "");
+          if (
+            currentReceipt === "rejected" || currentStatus === "cancelled" ||
+            currentPayment === "rejected"
+          ) {
+            result = "rejected";
+            confidence = 0.1;
+          } else if (
+            currentReceipt === "auto_approved" &&
+            (["confirmed", "completed"].includes(currentStatus) ||
+              ["paid", "downpayment_paid"].includes(currentPayment))
+          ) {
+            // Another verifier completed the same booking. The database is
+            // authoritative, so reporting the already-persisted success is safe.
+            result = "auto_approved";
+            confidence = Math.max(0.9, ocrConfidence);
+          } else if (
+            currentReceipt === "manual_review" ||
+            currentPayment === "for_verification"
+          ) {
+            result = "manual_review";
+            confidence = 0.5;
+          } else {
+            finalUpdateError = `No non-terminal row matched ref=${bookingRef}`;
+            console.error(finalUpdateError);
+          }
+        }
+        if (!currentRow && !finalUpdateError) {
           finalUpdateError = `No non-terminal row matched ref=${bookingRef}`;
           console.error(finalUpdateError);
         }
@@ -1760,6 +1889,38 @@ Deno.serve(async (req) => {
           console.error(
             "FALLBACK cancel succeeded after status update failure",
           );
+          finalUpdateError = null;
+        }
+      }
+
+      if (finalUpdateError) {
+        // Never tell the browser that payment was confirmed when the final
+        // booking/payment write did not persist. The receipt was already
+        // attached in the safe pending state above, so route it to the owner.
+        if (!flags.includes("FINAL_STATE_PERSISTENCE_FAILED")) {
+          flags.push("FINAL_STATE_PERSISTENCE_FAILED");
+        }
+        result = "manual_review";
+        confidence = 0.5;
+        metadataUpdate.receipt_status = result;
+        metadataUpdate.receipt_flags = flags;
+        metadataUpdate.receipt_confidence = confidence;
+
+        const { data: manualRows, error: manualErr } = await bookingUpdateQuery(
+          db,
+          booking,
+          {
+            ...metadataUpdate,
+            status: "pending",
+            payment_status: "for_verification",
+          },
+        ).in("status", ["verifying", "pending"]).select("ref");
+        if (manualErr || !manualRows || manualRows.length === 0) {
+          console.error(
+            "manual-review persistence fallback failed:",
+            manualErr ? errMsg(manualErr) : "no active booking rows updated",
+          );
+        } else {
           finalUpdateError = null;
         }
       }
@@ -1805,7 +1966,7 @@ Deno.serve(async (req) => {
       receiptImageHash: imageHash,
       receiptPhash: phash,
       receiptVerifiedAt: metadataUpdate.receipt_verified_at,
-      ...(finalUpdateError ? { warning: `booking update failed: ${finalUpdateError}` } : {}),
+      ...(finalUpdateError ? { manualReviewRequired: true } : {}),
       message: result === "auto_approved" ? "Payment verified." : result === "manual_review" ? "Received — the owner will verify your payment shortly." : "Your receipt could not be verified. Your booking has been cancelled — please try again with a valid receipt.",
     });
   } catch (err) {

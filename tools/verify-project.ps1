@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 try {
-  $checkFiles = @('booking-balance.js', 'brand-config.js', 'supabase-config.js', '_worker.js', 'create-accounts.js', 'setup-db.js', 'tools/local-server.js', 'platform/schema-contract.test.js', 'platform/functions-contract.test.js')
+  $checkFiles = @('booking-balance.js', 'brand-config.js', 'supabase-config.js', 'single-tenant-api.js', '_worker.js', 'tools/local-server.js', 'single-tenant-schema-contract.test.js', 'single-tenant-bridge-contract.test.js')
   foreach ($file in $checkFiles) {
     & node --check $file
     if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $file" }
@@ -16,19 +16,28 @@ try {
   & npm.cmd test
   if ($LASTEXITCODE -ne 0) { throw 'Node test suite failed.' }
 
+  $denoAvailable = $false
   if (Get-Command deno -ErrorAction SilentlyContinue) {
-    $functionFiles = Get-ChildItem -LiteralPath 'platform\supabase\functions' -Directory |
+    try {
+      & deno --version 2>$null | Out-Null
+      $denoAvailable = $LASTEXITCODE -eq 0
+    } catch {
+      Write-Warning "Deno is installed but cannot run in this environment; Edge Function type checking was skipped."
+    }
+  }
+  if ($denoAvailable) {
+    $functionFiles = Get-ChildItem -LiteralPath 'supabase\functions' -Directory |
       ForEach-Object { Join-Path $_.FullName 'index.ts' } |
       Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
     & deno check $functionFiles
-    if ($LASTEXITCODE -ne 0) { throw 'Platform Edge Function type checking failed.' }
+    if ($LASTEXITCODE -ne 0) { throw 'D''fortees Edge Function type checking failed.' }
   }
 
-  $runtimeTargets = @('index.html', 'admin.html', 'login.html', 'host.html', 'brand-config.js', 'brand.css', 'supabase-config.js', '_worker.js', 'platform')
+  $runtimeTargets = @('index.html', 'admin.html', 'login.html', 'host.html', 'brand-config.js', 'brand.css', 'supabase-config.js', 'single-tenant-api.js', '_worker.js', 'supabase/migrations/20260717130000_single_tenant_security.sql')
   $legacyMatches = & rg -i -l 'korte|kortedos|korte-dos' @runtimeTargets 2>$null
   if ($legacyMatches) { throw "Legacy brand identifiers remain in runtime code: $($legacyMatches -join ', ')" }
 
-  $configTargets = @('supabase-config.js', '_worker.js', 'deploy-edge-functions.ps1', 'deploy-cloudflare-pages.ps1', 'platform')
+  $configTargets = @('supabase-config.js', 'single-tenant-api.js', '_worker.js', 'deploy-edge-functions.ps1', 'deploy-cloudflare-pages.ps1', 'supabase/migrations/20260717130000_single_tenant_security.sql')
   $blockedPatterns = @('https://[a-z0-9-]+\.supabase\.co', 'eyJ[A-Za-z0-9._-]{40,}', 'ca-pub-1871576789265012')
   foreach ($pattern in $blockedPatterns) {
     $matches = & rg -i -l $pattern @configTargets 2>$null

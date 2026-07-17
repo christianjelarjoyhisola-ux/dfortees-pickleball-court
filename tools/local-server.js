@@ -33,25 +33,51 @@ const contentTypes = {
   '.svg': 'image/svg+xml',
 };
 
+const publicFiles = new Set([
+  'admin.html',
+  'booking-balance.js',
+  'brand-config.js',
+  'brand.css',
+  'chart.min.js',
+  'dforteesspash.jpg',
+  'host.html',
+  'index.html',
+  'login.html',
+  'logodfortees.jpg',
+  'single-tenant-api.js',
+  'supabase-config.js',
+  'supabase.min.js',
+]);
+
+function sendPlainText(response, statusCode, message, extraHeaders = {}) {
+  response.writeHead(statusCode, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    ...extraHeaders,
+  });
+  response.end(message);
+}
+
 const server = http.createServer((request, response) => {
   let pathname;
   try {
     pathname = decodeURIComponent(new URL(request.url, `http://${host}:${port}`).pathname);
   } catch {
-    response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-    response.end('Bad request');
+    sendPlainText(response, 400, 'Bad request');
+    return;
+  }
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    sendPlainText(response, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
     return;
   }
 
   if (pathname === '/runtime-config.js') {
-    const tenantSlug = /^[a-z0-9][a-z0-9-]{1,62}$/.test(process.env.PB_TENANT_SLUG || '')
-      ? process.env.PB_TENANT_SLUG
-      : 'dfortees';
     const config = {
       supabaseUrl: process.env.PB_SUPABASE_URL || 'https://dfortees-backend.invalid',
       supabasePublishableKey:
         process.env.PB_SUPABASE_PUBLISHABLE_KEY || 'DFORTEES_SUPABASE_PUBLISHABLE_KEY_NOT_CONFIGURED',
-      tenantSlug,
     };
     const body = `window.PB_RUNTIME_CONFIG = Object.freeze(${JSON.stringify(config).replaceAll('<', '\\u003c')});\n`;
     response.writeHead(200, {
@@ -59,25 +85,22 @@ const server = http.createServer((request, response) => {
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     });
-    response.end(body);
+    response.end(request.method === 'HEAD' ? undefined : body);
     return;
   }
 
   if (pathname === '/') pathname = '/index.html';
-  const filePath = path.resolve(root, `.${pathname}`);
-  if (filePath !== root && !filePath.startsWith(`${root}${path.sep}`)) {
-    response.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-    response.end('Forbidden');
+  const segments = pathname.split('/').filter(Boolean);
+  const publicFile = segments.length === 1 ? segments[0] : '';
+  if (!publicFile || publicFile.startsWith('.') || !publicFiles.has(publicFile)) {
+    sendPlainText(response, 404, 'Not found');
     return;
   }
+  const filePath = path.join(root, publicFile);
 
   fs.readFile(filePath, (error, data) => {
     if (error) {
-      response.writeHead(error.code === 'ENOENT' ? 404 : 500, {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-store',
-      });
-      response.end(error.code === 'ENOENT' ? 'Not found' : 'Server error');
+      sendPlainText(response, error.code === 'ENOENT' ? 404 : 500, error.code === 'ENOENT' ? 'Not found' : 'Server error');
       return;
     }
 
@@ -86,7 +109,7 @@ const server = http.createServer((request, response) => {
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     });
-    response.end(data);
+    response.end(request.method === 'HEAD' ? undefined : data);
   });
 });
 

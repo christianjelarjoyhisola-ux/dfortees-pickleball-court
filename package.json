@@ -6,8 +6,8 @@
   "scripts": {
     "build:pages": "node tools/build-pages.js",
     "dev": "node tools/local-server.js",
-    "test": "node --test booking-balance.test.js platform/schema-contract.test.js platform/functions-contract.test.js",
-    "check": "node --check booking-balance.js && node --check brand-config.js && node --check supabase-config.js && node --check _worker.js && node --check create-accounts.js && node --check setup-db.js && node --check tools/local-server.js && node --check platform/schema-contract.test.js && node --check platform/functions-contract.test.js",
+    "test": "node --test booking-balance.test.js single-tenant-schema-contract.test.js single-tenant-bridge-contract.test.js notification-security-contract.test.js receipt-verification-security-contract.test.js",
+    "check": "node --check booking-balance.js && node --check brand-config.js && node --check supabase-config.js && node --check single-tenant-api.js && node --check _worker.js && node --check tools/local-server.js && node --check single-tenant-schema-contract.test.js && node --check single-tenant-bridge-contract.test.js && node --check notification-security-contract.test.js && node --check receipt-verification-security-contract.test.js",
     "verify": "powershell -ExecutionPolicy Bypass -File tools/verify-project.ps1"
   },
   "dependencies": {

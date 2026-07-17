@@ -1,3 +1,5 @@
+import { HttpError, jsonError, requireActiveAdmin, resolveBookingAccess } from "../_shared/notification-auth.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -22,6 +24,7 @@ type BookingPayload = {
   event?: string;
   note?: string;
   gcashRef?: string | null;
+  guestAccessToken?: string;
 };
 
 type BookingUpdatePayload = BookingPayload & {
@@ -31,6 +34,7 @@ type BookingUpdatePayload = BookingPayload & {
 
 type OpenPlayPayload = {
   type: "open_play";
+  registrationId?: number;
   fullName: string;
   courtName: string;
   date: string;
@@ -40,6 +44,11 @@ type OpenPlayPayload = {
 };
 
 type Payload = BookingPayload | BookingUpdatePayload | OpenPlayPayload;
+
+const BOOKING_EVENTS = new Set([
+  "new_booking", "booking_confirmed", "booking_rescheduled", "booking_cancelled",
+  "payment_verified", "payment_rejected", "payment_review_needed", "admin_booking_created",
+]);
 
 function esc(v: unknown): string {
   return String(v ?? "")
@@ -157,6 +166,38 @@ function buildOpenPlayMessage(p: OpenPlayPayload): string {
   );
 }
 
+function serverBookingPayload(row: Record<string, unknown>, request: BookingPayload, isAdmin: boolean): BookingPayload {
+  const status = String(row.status || "pending");
+  const requestedEvent = String(request.event || "").toLowerCase();
+  const event = isAdmin && BOOKING_EVENTS.has(requestedEvent)
+    ? requestedEvent
+    : status === "confirmed"
+      ? "booking_confirmed"
+      : status === "cancelled" || status === "forfeited"
+        ? "booking_cancelled"
+        : "new_booking";
+
+  return {
+    type: request.type === "booking_update" || event !== "new_booking" ? "booking_update" : "booking",
+    bookingRef: String(row.booking_group_ref || row.ref || ""),
+    fullName: String(row.full_name || ""),
+    contactNumber: String(row.contact_number || ""),
+    courtName: String(row.court_name || ""),
+    date: String(row.date || ""),
+    startTime: String(row.start_time || ""),
+    endTime: String(row.end_time || ""),
+    duration: Number(row.duration || 0),
+    total: Number(row.total || 0),
+    downpayment: Number(row.downpayment || 0),
+    paymentMethod: String(row.payment_method || "cash"),
+    paymentStatus: String(row.payment_status || "unpaid"),
+    bookingStatus: status,
+    gcashRef: row.gcash_ref ? String(row.gcash_ref) : null,
+    event,
+    note: isAdmin ? String(request.note || "").trim().slice(0, 300) : "",
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") {
@@ -164,6 +205,40 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const body = (await req.json().catch(() => ({}))) as Payload;
+    let message: string;
+
+    if (body.type === "open_play") {
+      const { db } = await requireActiveAdmin(req);
+      const registrationId = Number(body.registrationId || 0);
+      if (!Number.isSafeInteger(registrationId) || registrationId <= 0) {
+        throw new HttpError(400, "A valid Open Play registration ID is required");
+      }
+      const { data: registration, error } = await db.from("open_play_registrations")
+        .select("id,full_name,court_name,date,time_label,payment_type,amount")
+        .eq("id", registrationId)
+        .maybeSingle();
+      if (error) throw new HttpError(500, "Unable to load Open Play registration");
+      if (!registration) throw new HttpError(404, "Open Play registration not found");
+      message = buildOpenPlayMessage({
+        type: "open_play",
+        registrationId,
+        fullName: registration.full_name,
+        courtName: registration.court_name,
+        date: registration.date,
+        timeLabel: registration.time_label,
+        paymentType: registration.payment_type,
+        amount: Number(registration.amount || 0),
+      });
+    } else {
+      const request = body as BookingPayload;
+      const access = await resolveBookingAccess(req, request as unknown as Record<string, unknown>);
+      const trusted = serverBookingPayload(access.requestedRow as unknown as Record<string, unknown>, request, access.isAdmin);
+      message = trusted.type === "booking_update"
+        ? buildBookingUpdateMessage(trusted as BookingUpdatePayload)
+        : buildBookingMessage(trusted);
+    }
+
     const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN") || "";
     const chatIdRaw = Deno.env.get("TELEGRAM_CHAT_ID") || "";
 
@@ -175,36 +250,6 @@ Deno.serve(async (req) => {
     }
 
     const chatIds = chatIdRaw.split(",").map((id) => id.trim()).filter(Boolean);
-    const body = (await req.json()) as Payload;
-
-    let message: string;
-    if (body.type === "open_play") {
-      if (!body.fullName) {
-        return new Response(JSON.stringify({ error: "Missing required fields" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      message = buildOpenPlayMessage(body);
-    } else if (body.type === "booking_update") {
-      const b = body as BookingUpdatePayload;
-      if (!b.bookingRef || !b.fullName || !b.event) {
-        return new Response(JSON.stringify({ error: "Missing required fields" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      message = buildBookingUpdateMessage(b);
-    } else {
-      const b = body as BookingPayload;
-      if (!b.bookingRef || !b.fullName) {
-        return new Response(JSON.stringify({ error: "Missing required fields" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      message = buildBookingMessage(b);
-    }
 
     const results = await Promise.allSettled(
       chatIds.map(async (chatId) => {
@@ -234,10 +279,6 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return new Response(JSON.stringify({ ok: false, error: msg }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonError(err, corsHeaders);
   }
 });

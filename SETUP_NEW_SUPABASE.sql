@@ -1,7 +1,8 @@
 -- ============================================================
 -- D’FORTEES - COMPLETE SUPABASE DATABASE SETUP
--- Use this on a fresh Supabase project:
---   Supabase Dashboard -> SQL Editor -> New query -> Run
+-- INTERNAL BASELINE FRAGMENT - DO NOT RUN THIS FILE BY ITSELF.
+-- Generate and review .generated/dfortees-fresh-database.sql with
+-- tools/build-fresh-database-bundle.ps1 for a fresh project.
 --
 -- This file is a consolidated baseline of the migration history.
 -- Do not run it as a replacement for migrations on an existing
@@ -1940,19 +1941,20 @@ drop policy if exists host_ids_no_delete on storage.objects;
 
 insert into public.courts (id, name, description, rate, blocked, feats)
 values
-  ('c1', 'Court Alpha', 'Outdoor - Open Air - Standard Flooring', 350, false, array['Outdoor','Open Air','Standard Floor']),
-  ('c2', 'Court Beta', 'Outdoor - Open Air - Standard Flooring', 280, false, array['Outdoor','Open Air','Standard Floor'])
+  ('c1', 'D''fortees Pickleball Court', 'Outdoor court', 60, false, array['Outdoor'])
 on conflict (id) do nothing;
 
 insert into public.settings (key, value)
 values
   ('venue_name', 'D’fortees Pickleball Court'),
   ('open_time', '6'),
-  ('close_time', '22'),
+  ('close_time', '24'),
   ('booking_fee', '5'),
   ('open_play_fee', '100'),
-  ('payment_method_maya', '1'),
-  ('payment_method_bpi', '1')
+  ('payment_method_cash', '1'),
+  ('payment_method_gcash', '0'),
+  ('payment_method_maya', '0'),
+  ('payment_method_bpi', '0')
 on conflict (key) do nothing;
 
 notify pgrst, 'reload schema';
@@ -1960,12 +1962,6 @@ notify pgrst, 'reload schema';
 -- ============================================================
 -- DONE
 --
--- Next steps:
--- 1. In a new SQL Editor query, run the complete contents of
---    supabase/migrations/20260713213000_accumulated_booking_fee_remittances.sql.
--- 2. Authentication -> Providers -> Email -> disable Confirm email.
--- 3. Project Settings -> API -> copy Project URL and anon public key.
--- 4. Update .env.local / supabase-config.js for the cloned app.
--- 5. Run create-accounts.js with a service-role key to create dashboard users.
--- 6. Deploy edge functions and configure their required secrets.
+-- This fragment is intentionally incomplete. Use the generated fresh-database
+-- bundle so every security and D'fortees hardening migration is applied.
 -- ============================================================

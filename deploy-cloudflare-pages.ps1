@@ -44,17 +44,15 @@ $branchName = if ($envMap["CLOUDFLARE_PAGES_BRANCH"]) { $envMap["CLOUDFLARE_PAGE
 
 $runtimeUrl = [string]$envMap["PB_SUPABASE_URL"]
 $runtimeKey = [string]$envMap["PB_SUPABASE_PUBLISHABLE_KEY"]
-$runtimeTenant = [string]$envMap["PB_TENANT_SLUG"]
 $backendConfigured = $runtimeUrl -match '^https://[a-z0-9]+\.supabase\.co$' -and
-  $runtimeKey -match '^sb_publishable_' -and
-  $runtimeTenant -match '^[a-z0-9][a-z0-9-]{1,62}$'
+  $runtimeKey -match '^sb_publishable_'
 
 if (-not $backendConfigured) {
   if (-not $AllowDemoMode) {
-    throw "Set PB_SUPABASE_URL, PB_SUPABASE_PUBLISHABLE_KEY, and PB_TENANT_SLUG in .env.local, or use -AllowDemoMode."
+    throw "Set PB_SUPABASE_URL and PB_SUPABASE_PUBLISHABLE_KEY in .env.local, or use -AllowDemoMode."
   }
   Write-Warning "Deploying D'fortees in browser-only demo mode. Data will be local to each visitor's browser."
-} elseif ($runtimeUrl -match "ekldjeskfddtzznamkxh" -and -not $AllowDevelopmentBackend) {
+} elseif ($runtimeUrl -match "ebykgvvjsuawawdheyil" -and -not $AllowDevelopmentBackend) {
   throw "The backend is the Free development project. Pass -AllowDevelopmentBackend only for an intentional non-production preview."
 } elseif ($runtimeUrl -match 'korte') {
   throw "A blocked legacy Supabase URL was detected. Deployment stopped."
@@ -72,14 +70,33 @@ $publicFiles = @(
   "host.html",
   "index.html",
   "login.html",
+  "logodfortees.jpg",
+  "single-tenant-api.js",
   "supabase-config.js",
   "supabase.min.js"
 )
 
-New-Item -ItemType Directory -Force ".cf-pages-deploy" | Out-Null
+$repoRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
+$deployDirectory = Join-Path $repoRoot ".cf-pages-deploy"
+$deployParent = [System.IO.Path]::GetFullPath((Split-Path -Parent $deployDirectory))
+if ($deployParent -ne $repoRoot -or (Split-Path -Leaf $deployDirectory) -ne ".cf-pages-deploy") {
+  throw "Refusing to clean an unexpected Cloudflare deployment directory: $deployDirectory"
+}
+if (Test-Path -LiteralPath $deployDirectory) {
+  $existingDeployDirectory = Get-Item -LiteralPath $deployDirectory -Force
+  if (-not $existingDeployDirectory.PSIsContainer -or
+      ($existingDeployDirectory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+    throw "Refusing to clean a non-directory or linked Cloudflare deployment path: $deployDirectory"
+  }
+  Remove-Item -LiteralPath $deployDirectory -Recurse -Force
+}
+New-Item -ItemType Directory -Path $deployDirectory | Out-Null
 foreach ($file in $publicFiles) {
-  if (Test-Path $file) {
-    Copy-Item -LiteralPath $file -Destination ".cf-pages-deploy" -Force
+  $source = Join-Path $repoRoot $file
+  if (Test-Path -LiteralPath $source -PathType Leaf) {
+    Copy-Item -LiteralPath $source -Destination $deployDirectory -Force
+  } else {
+    throw "Required public deployment file is missing: $file"
   }
 }
 
@@ -87,7 +104,6 @@ if ($backendConfigured) {
   $runtimeSecrets = @{
     "PB_SUPABASE_URL" = $runtimeUrl
     "PB_SUPABASE_PUBLISHABLE_KEY" = $runtimeKey
-    "PB_TENANT_SLUG" = $runtimeTenant
   }
   foreach ($name in $runtimeSecrets.Keys) {
     $runtimeSecrets[$name] | npx wrangler pages secret put $name --project-name $projectName
@@ -95,7 +111,7 @@ if ($backendConfigured) {
   }
 }
 
-npx wrangler pages deploy ".cf-pages-deploy" --project-name $projectName --branch $branchName
+npx wrangler pages deploy $deployDirectory --project-name $projectName --branch $branchName
 if ($LASTEXITCODE -ne 0) {
   throw "Cloudflare Pages deploy failed with exit code $LASTEXITCODE."
 }

@@ -3254,7 +3254,7 @@ body.host-mode .courts { padding-bottom:140px; }
 
           <!-- Cash note -->
           <div class="cash-note" id="cashNote" style="display:none">
-            💵 <strong>Cash payment</strong> is only available for pre-arranged bookings — you must have already contacted the manager and received approval before selecting this option. Payment is due at the front desk upon arrival.
+            💵 <strong>Cash payment</strong> is paid at the front desk. Your booking request stays pending until staff confirms it.
           </div>
 
           <div class="down-note" id="downNote" style="margin-top:10px">
@@ -3279,7 +3279,7 @@ body.host-mode .courts { padding-bottom:140px; }
   <div class="sec-hd"><h2>HOW IT WORKS</h2></div>
   <div class="how">
     <div class="hc"><div class="hc-ic">🏟️</div><div class="hc-tt">Pick a Court</div><div class="hc-ds">Browse courts and compare rates and features.</div></div>
-    <div class="hc"><div class="hc-ic">📅</div><div class="hc-tt">Choose Your Time</div><div class="hc-ds">Select a date and any available time slots from 6 AM to 10 PM.</div></div>
+    <div class="hc"><div class="hc-ic">📅</div><div class="hc-tt">Choose Your Time</div><div class="hc-ds">Select a date and any available time from 6 AM to midnight.</div></div>
     <div class="hc"><div class="hc-ic">📝</div><div class="hc-tt">Fill in Details</div><div class="hc-ds">Enter your contact info and preferred payment method.</div></div>
     <div class="hc"><div class="hc-ic">✅</div><div class="hc-tt">Get Confirmed</div><div class="hc-ds">Receive your booking reference and invoice instantly.</div></div>
   </div>
@@ -7905,6 +7905,7 @@ async function openHostBookings() {
    REAL-TIME — Supabase live updates
    ============================================= */
 let _rtDebounce = null;
+let _availabilityPoll = null;
 async function refreshLiveViews() {
   const openDate = selectedCourtBrowseDate();
 
@@ -7926,6 +7927,16 @@ function startRealtime() {
       refreshLiveViews().catch(() => {});
     }, 120);
   };
+  // Guest booking PII is deliberately not readable through Realtime. Poll
+  // the sanitized availability RPC instead so mobile browsers still refresh
+  // while the page is open without exposing customer rows.
+  if (!window.Auth?.getSession?.()) {
+    clearInterval(_availabilityPoll);
+    _availabilityPoll = setInterval(() => {
+      if (document.visibilityState === 'visible') onChange();
+    }, 15000);
+    return;
+  }
   _supabase.channel('public-rt')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'courts' }, onChange)
@@ -8752,7 +8763,8 @@ async function submitOpenPlay() {
 </script>
 <script src="/runtime-config.js"></script>
 <script src="supabase.min.js"></script>
-<script src="supabase-config.js?v=20260714-owner-void-v1"></script>
+<script src="supabase-config.js?v=20260717-single-tenant-v1"></script>
+<script src="single-tenant-api.js?v=20260717-single-tenant-v1"></script>
 
 <!-- MOBILE STICKY BOOK NOW BAR -->
 <div id="mobileBookBar" class="mobile-book-bar" style="display:none">

@@ -1,3 +1,5 @@
+import { HttpError, jsonError, resolveBookingAccess } from "../_shared/notification-auth.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -10,13 +12,18 @@ type Payload = {
   email: string;
   fullName: string;
   courtName: string;
-  oldDate: string;
-  oldStartTime: string;
-  oldEndTime: string;
+  oldDate?: string;
+  oldStartTime?: string;
+  oldEndTime?: string;
   newDate: string;
   newStartTime: string;
   newEndTime: string;
   newDuration: number;
+  note?: string;
+};
+
+type RequestPayload = {
+  bookingRef?: string;
   note?: string;
 };
 
@@ -54,6 +61,16 @@ function buildHtml(p: Payload): string {
         </div>
        </div>`
     : "";
+  const oldSchedule = p.oldDate && p.oldStartTime && p.oldEndTime
+    ? `<tr><td style="background:#241313;background-image:linear-gradient(#241313,#241313);border:1.5px solid #7a3732;border-bottom:none;border-radius:10px 10px 0 0;padding:14px 20px;">
+            <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:1px;color:#f28b82;margin-bottom:6px;font-weight:700;">Old Schedule</div>
+            <div style="font-size:.92rem;color:#f1b2ae;text-decoration:line-through;">${fmtDate(p.oldDate)}</div>
+            <div style="font-size:.88rem;color:#f1b2ae;text-decoration:line-through;">${oldStartTime} &ndash; ${oldEndTime}</div>
+          </td></tr>`
+    : "";
+  const newScheduleBorder = oldSchedule
+    ? "border:1.5px solid #8b4b20;border-top:none;border-radius:0 0 10px 10px;"
+    : "border:1.5px solid #8b4b20;border-radius:10px;";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -89,12 +106,8 @@ function buildHtml(p: Payload): string {
         ${note}
 
         <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:10px;overflow:hidden;margin-bottom:24px;">
-          <tr><td style="background:#241313;background-image:linear-gradient(#241313,#241313);border:1.5px solid #7a3732;border-bottom:none;border-radius:10px 10px 0 0;padding:14px 20px;">
-            <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:1px;color:#f28b82;margin-bottom:6px;font-weight:700;">Old Schedule</div>
-            <div style="font-size:.92rem;color:#f1b2ae;text-decoration:line-through;">${fmtDate(p.oldDate)}</div>
-            <div style="font-size:.88rem;color:#f1b2ae;text-decoration:line-through;">${oldStartTime} &ndash; ${oldEndTime}</div>
-          </td></tr>
-          <tr><td style="background:#1d241e;background-image:linear-gradient(#1d241e,#1d241e);border:1.5px solid #8b4b20;border-top:none;border-radius:0 0 10px 10px;padding:14px 20px;">
+          ${oldSchedule}
+          <tr><td style="background:#1d241e;background-image:linear-gradient(#1d241e,#1d241e);${newScheduleBorder}padding:14px 20px;">
             <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:1px;color:#f49a4a;margin-bottom:6px;font-weight:700;">New Schedule</div>
             <div style="font-size:1rem;font-weight:800;color:#f7fafc;">${fmtDate(p.newDate)}</div>
             <div style="font-size:.92rem;font-weight:600;color:#d7dee8;">${newStartTime} &ndash; ${newEndTime} &middot; ${p.newDuration} hr${p.newDuration !== 1 ? "s" : ""}</div>
@@ -133,13 +146,24 @@ Deno.serve(async (req) => {
     const resendKey = Deno.env.get("RESEND_API_KEY") || "";
     if (!resendKey) throw new Error("RESEND_API_KEY is not configured");
 
-    const body = (await req.json()) as Payload;
-    if (!body.email || !body.bookingRef) {
-      return new Response(JSON.stringify({ error: "Missing email or bookingRef" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const requestBody = (await req.json().catch(() => ({}))) as RequestPayload;
+    const access = await resolveBookingAccess(req, requestBody as Record<string, unknown>, { adminOnly: true });
+    const booking = access.requestedRow;
+    if (!booking.email) throw new HttpError(409, "This booking does not have an email address");
+
+    // The booking destination and current schedule always come from the
+    // database. A signed-in administrator may supply only the human note.
+    const body: Payload = {
+      bookingRef: booking.booking_group_ref || booking.ref,
+      email: booking.email,
+      fullName: booking.full_name,
+      courtName: booking.court_name,
+      newDate: booking.date,
+      newStartTime: booking.start_time,
+      newEndTime: booking.end_time,
+      newDuration: Number(booking.duration || 0),
+      note: String(requestBody.note || "").trim().slice(0, 600),
+    };
 
     const fromAddress = Deno.env.get("EMAIL_FROM") || "D’FORTEES <onboarding@resend.dev>";
 
@@ -165,10 +189,6 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return new Response(JSON.stringify({ ok: false, error: msg }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonError(err, corsHeaders);
   }
 });

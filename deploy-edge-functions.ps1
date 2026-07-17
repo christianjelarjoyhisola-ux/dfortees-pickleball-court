@@ -29,14 +29,14 @@ function Resolve-Value($Name, $Values) {
 }
 
 $values = Read-EnvFile $envFile
-$approval = Resolve-Value "PLATFORM_EDGE_DEPLOYMENT_APPROVED" $values
-if ($approval -ne "court-booking-platform-dev") {
-  throw "Set PLATFORM_EDGE_DEPLOYMENT_APPROVED=court-booking-platform-dev. Legacy functions are intentionally blocked."
+$approval = Resolve-Value "DFORTEES_EDGE_DEPLOYMENT_APPROVED" $values
+if ($approval -ne "I_UNDERSTAND") {
+  throw "Set DFORTEES_EDGE_DEPLOYMENT_APPROVED=I_UNDERSTAND before deploying reviewed D'fortees functions."
 }
 
 $projectRef = Resolve-Value "SUPABASE_PROJECT_REF" $values
-if ($projectRef -ne "ekldjeskfddtzznamkxh") {
-  throw "This development deploy script only targets the isolated court-booking-platform-dev project."
+if ($projectRef -ne "ebykgvvjsuawawdheyil") {
+  throw "This script only targets the isolated dfortees-booking Supabase project."
 }
 
 $accessToken = Resolve-Value "SUPABASE_ACCESS_TOKEN" $values
@@ -47,10 +47,16 @@ $npx = Get-Command "npx.cmd" -ErrorAction SilentlyContinue
 if (-not $npx) { $npx = Get-Command "npx" -ErrorAction SilentlyContinue }
 if (-not $npx) { throw "Node.js/npx is required to deploy the platform functions." }
 
-$platformRoot = Join-Path $repoRoot "platform"
-$functions = @("manage-member", "create-file-upload")
+$functions = @(
+  "create-payment-session",
+  "verify-gcash-receipt",
+  "send-confirmation-email",
+  "send-reschedule-email",
+  "send-telegram-notification",
+  "process-host-balance-deadlines"
+)
 
-Push-Location $platformRoot
+Push-Location $repoRoot
 try {
   foreach ($functionName in $functions) {
     & $npx.Source supabase functions deploy $functionName --project-ref $projectRef
@@ -62,4 +68,4 @@ try {
   Pop-Location
 }
 
-Write-Host "Deployed only the tenant-aware Court Booking Platform functions."
+Write-Host "Deployed only the reviewed D'fortees single-tenant Edge Functions."

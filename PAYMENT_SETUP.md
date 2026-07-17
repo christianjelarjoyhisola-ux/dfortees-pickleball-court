@@ -1,87 +1,93 @@
-# Secure GCash Payment Setup (Dynamic Amount + Auto Sync)
+# D'fortees Payment and Edge Function Setup
 
-This project now supports:
-- Dynamic downpayment amount from booking form
-- Server-created payment session (no raw gateway URL logic in browser)
-- Webhook-based auto update of booking payment status
+## Current payment mode: cash only
 
-## 1) Run DB Migration
+D'fortees currently accepts cash at the front desk. The database baseline keeps
+these settings:
 
-Apply:
+- `payment_method_cash = 1`
+- `payment_method_gcash = 0`
+- `payment_method_bdopay = 0`
+- `payment_method_maya = 0`
+- `payment_method_bpi = 0`
+- `payment_method_gotyme = 0`
+- `payment_method_pnb = 0`
+- `gcash_checkout_enabled = 0`
 
-`supabase/migrations/20260227_payment_security.sql`
+Availability, server-side pricing, slot locking, and guest cash booking are
+implemented by secured database functions. The customer does not need a login,
+and the core cash flow does not require an Edge Function or payment webhook.
+A new cash booking remains unpaid/pending until authorized staff confirms it.
 
-It adds:
-- New payment columns on `bookings`
-- `payment_sessions` table for checkout tracking
+## Reviewed Edge Function allowlist
 
-## 2) Deploy Supabase Edge Functions
+`deploy-edge-functions.ps1` is locked to the isolated D'fortees Supabase project
+and deploys only these reviewed functions:
 
-Deploy:
-- `supabase/functions/create-payment-session`
-- `supabase/functions/payment-webhook`
+- `create-payment-session`
+- `verify-gcash-receipt`
+- `send-confirmation-email`
+- `send-reschedule-email`
+- `send-telegram-notification`
+- `process-host-balance-deadlines`
 
-Example:
+The payment and receipt functions remain dormant while digital payment methods
+are disabled. Email, Telegram, and scheduled balance processing are optional and
+must not be enabled until their secrets and authorization paths are configured
+and tested.
 
-```bash
-supabase functions deploy create-payment-session
-supabase functions deploy payment-webhook
-```
+Do not deploy `payment-webhook`, `integration-status`, `manage-account`, or
+`host-application`. They are outside the reviewed deployment allowlist. In
+particular, `payment-webhook` does not provide a production-approved,
+provider-native PayMongo signature verification path.
 
-## 3) Set Function Environment Variables
+## Deploying optional reviewed functions
 
-Required:
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `PAYMENT_PROVIDER`
+1. Keep the current cash-only database settings unchanged.
+2. Put CLI controls only in the ignored `.env.local`:
 
-Recommended (dynamic amount with PayMongo):
-- `PAYMENT_PROVIDER=paymongo`
-- `PAYMONGO_SECRET_KEY=sk_live_...` (or `sk_test_...`)
-- `PAYMENT_SUCCESS_URL=https://your-domain/success`
-- `PAYMENT_CANCEL_URL=https://your-domain/cancel`
+   ```dotenv
+   SUPABASE_PROJECT_REF=YOUR_DFORTEES_PROJECT_REF
+   SUPABASE_ACCESS_TOKEN=YOUR_PERSONAL_ACCESS_TOKEN
+   DFORTEES_EDGE_DEPLOYMENT_APPROVED=I_UNDERSTAND
+   ```
 
-Template fallback mode (legacy/static-link style):
-- `PAYMENT_PROVIDER=template`
-- `PAYMENT_CHECKOUT_URL_TEMPLATE=https://your-gateway-link?...`
+3. Configure provider secrets in Supabase Edge Function secrets, not in the
+   repository or browser runtime. Supabase provides `SUPABASE_URL` and
+   `SUPABASE_SERVICE_ROLE_KEY` to functions; never expose the latter publicly.
+4. Set only the secrets needed by the optional feature being enabled:
 
-Optional security:
-- `PAYMENT_WEBHOOK_SECRET` (used by `payment-webhook` via `x-payment-signature` HMAC SHA-256)
+   - Email: `RESEND_API_KEY`, `EMAIL_FROM`, and optionally `PUBLIC_LOGO_URL`
+   - Telegram: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `APP_ADMIN_URL`
+   - Scheduled balance processing: `HOST_BALANCE_CRON_SECRET` plus the email
+     secrets when email reminders are required
+   - Receipt analysis: optionally `GOOGLE_VISION_API_KEY` and Telegram secrets
 
-## 4) Configure Gateway Webhook
+5. Run the locked deployment script:
 
-Point your gateway webhook to:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\deploy-edge-functions.ps1
+   ```
 
-`https://<project-ref>.functions.supabase.co/payment-webhook`
+6. Test each deployed function with an authenticated, active dashboard user or
+   the required private guest/cron credential. Confirm missing or mismatched
+   authorization is rejected.
 
-Send payload fields:
-- `session_id` (preferred) or `booking_ref`
-- `status` (`paid`, `failed`, etc.)
-- `provider_reference` (optional)
-- `paid_at` (optional)
+## Enabling digital payments later
 
-## 5) Configure App Admin Settings
+Treat digital payments as a separate production change. Before enabling any
+digital method:
 
-In Admin panel:
-- Go to `Courts` -> `GCash Payment Settings`
-- Enable checkout mode
-- Set merchant name and number
-- Save
+1. Select the actual provider and use its official API and webhook signature
+   specification.
+2. Store provider credentials only as Supabase secrets.
+3. Bind payment sessions to server-stored booking data; never trust callback
+   amounts, booking references, or status values from query parameters.
+4. Implement replay protection, idempotency, timestamp tolerance, constant-time
+   signature comparison, and safe retry handling.
+5. Test paid, failed, expired, duplicated, reordered, and forged events in a
+   provider sandbox.
+6. Complete a security review before changing any `payment_method_*` setting to
+   enabled.
 
-The booking page will:
-- Save booking
-- Create secure payment session
-- Open checkout URL returned by function
-- Auto-sync payment status and confirm booking when webhook marks paid
-
-## PayMongo-specific notes
-
-- The function now creates a **new PayMongo Checkout Session per booking**, so amount is dynamic.
-- Webhook handler supports PayMongo event payload parsing and maps provider session IDs back to your booking.
-
-## 6) Security Notes
-
-- Keep provider secrets only in Edge Function env vars.
-- Do not expose service-role keys in frontend.
-- Keep `payment_sessions` RLS locked (already included in migration).
-- Use webhook signature validation (`PAYMENT_WEBHOOK_SECRET`) in production.
+Until those gates pass, cash-only is the supported and safest configuration.

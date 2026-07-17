@@ -1,8 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { calculateCourtPayment, closeMoney, roundMoney } from "../_shared/booking-payment.ts";
+import { authorizeBookingRequest } from "../_shared/request-authorization.ts";
 
 type CreatePayload = {
   bookingRef: string;
+  guestAccessToken?: string;
   amountPhp?: number;
   customer?: {
     name?: string;
@@ -210,6 +212,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    const authorization = await authorizeBookingRequest({
+      req,
+      db,
+      bookingRef,
+      guestAccessToken: body.guestAccessToken,
+    });
+    if (!authorization.ok) {
+      return new Response(JSON.stringify({ error: authorization.error }), {
+        status: authorization.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: booking, error: bookingErr } = await db
       .from("bookings")
       .select(
@@ -305,6 +320,9 @@ Deno.serve(async (req) => {
     providerName = "paymongo";
 
     const nowIso = new Date().toISOString();
+    // Never persist the guest ownership credential in payment audit payloads.
+    const safeRawRequest: Record<string, unknown> = { ...body };
+    delete safeRawRequest.guestAccessToken;
     const paymentRow = {
       id: sessionId,
       booking_ref: bookingRef,
@@ -313,7 +331,7 @@ Deno.serve(async (req) => {
       amount_php: amountPhp,
       status: "pending",
       checkout_url: checkoutUrl,
-      raw_request: body,
+      raw_request: safeRawRequest,
       created_at: nowIso,
       updated_at: nowIso,
     };

@@ -1,8 +1,14 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  HttpError,
+  authorizeScheduledRequest,
+  createServiceClient,
+  jsonError,
+  requireActiveAdmin,
+} from "../_shared/notification-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 const JSON_HEADERS = { ...corsHeaders, "Content-Type": "application/json" };
 const LOGO_URL = Deno.env.get("PUBLIC_LOGO_URL") || "";
@@ -114,19 +120,6 @@ function emailHtml(info: ReturnType<typeof summary>, eventType: string): string 
   </table></td></tr></table></body></html>`;
 }
 
-async function assertAdmin(req: Request, db: any) {
-  const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!token) throw new Error("Admin sign-in required");
-  const { data: userData } = await db.auth.getUser(token);
-  const userId = userData.user?.id;
-  if (!userId) throw new Error("Admin sign-in required");
-  const { data: accountData } = await db.from("accounts").select("role,status").eq("id", userId).single();
-  const account = accountData as { role?: string; status?: string } | null;
-  if (!account || account.status !== "active" || !["owner", "court_owner", "staff"].includes(String(account.role || ""))) {
-    throw new Error("Admin access required");
-  }
-}
-
 async function sendNotice(db: any, resendKey: string, rows: BookingRow[], eventType: string, force = false) {
   const info = summary(rows);
   if (!info.email || !info.deadline || info.balance <= 0) return { skipped: true, reason: "No recipient or balance" };
@@ -172,24 +165,31 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   try {
-    const url = Deno.env.get("SUPABASE_URL") || "";
-    const serviceKey = Deno.env.get("SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
     const resendKey = Deno.env.get("RESEND_API_KEY") || "";
-    if (!url || !serviceKey || !resendKey) throw new Error("Balance processor environment is incomplete");
-    const db = createClient(url, serviceKey, { auth: { persistSession: false } });
+    if (!resendKey) throw new HttpError(503, "Balance notification email is not configured");
+    const db = createServiceClient();
     const body = await req.json().catch(() => ({}));
 
     if (body.action === "manual") {
-      await assertAdmin(req, db);
+      await requireActiveAdmin(req, db);
       const ref = String(body.bookingRef || "");
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{4,63}$/.test(ref)) throw new HttpError(400, "A valid booking reference is required");
       const { data: seed } = await db.from("bookings").select("booking_group_ref").eq("ref", ref).single();
       const key = seed?.booking_group_ref || ref;
       const { data: manualRows, error } = await db.from("bookings").select("*").or(`ref.eq.${key},booking_group_ref.eq.${key}`);
-      if (error || !manualRows?.length) throw error || new Error("Booking not found");
-      const eventType = manualRows.some((row: BookingRow) => row.status === "forfeited") ? "forfeited" : String(body.eventType || "reminder_1d");
+      if (error) throw new HttpError(500, "Unable to load booking");
+      if (!manualRows?.length) throw new HttpError(404, "Booking not found");
+      const requestedEvent = String(body.eventType || "reminder_1d");
+      if (!["reminder_1d", "reminder_2d", "reminder_3d", "forfeited"].includes(requestedEvent)) {
+        throw new HttpError(400, "Invalid balance notification event");
+      }
+      const eventType = manualRows.some((row: BookingRow) => row.status === "forfeited") ? "forfeited" : requestedEvent;
       const result = await sendNotice(db, resendKey, manualRows as BookingRow[], eventType, true);
       return new Response(JSON.stringify({ ok: true, result }), { headers: JSON_HEADERS });
     }
+
+    if (body.action === "process" && body.source === "admin") await requireActiveAdmin(req, db);
+    else await authorizeScheduledRequest(req, db);
 
     const { data, error } = await db.from("bookings").select("*")
       .eq("host_booking", true).eq("status", "confirmed").eq("payment_status", "downpayment_paid")
@@ -221,7 +221,6 @@ Deno.serve(async (req) => {
     }
     return new Response(JSON.stringify({ ok: true, processed: results.length, results }), { headers: JSON_HEADERS });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return new Response(JSON.stringify({ ok: false, error: message }), { status: 500, headers: JSON_HEADERS });
+    return jsonError(error, corsHeaders);
   }
 });
