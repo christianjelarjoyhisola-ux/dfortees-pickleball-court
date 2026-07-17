@@ -19,6 +19,7 @@ $sources = @(
   'supabase\migrations\20260716120000_host_balance_deadlines.sql',
   'supabase\migrations\20260717130000_single_tenant_security.sql',
   'supabase\migrations\20260717143000_receipt_verification_rate_limit.sql',
+  'supabase\migrations\20260718090000_atomic_booking_cancellation.sql',
   'supabase\migrations\20260717214500_restore_service_role_privileges.sql'
 )
 

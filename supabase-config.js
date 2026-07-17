@@ -848,6 +848,24 @@ window.DB = {
   },
 
   async updateBooking(ref, updates) {
+    // Cancellation is an atomic database operation: the booking update and
+    // booking_slots release either both succeed or both fail.
+    if (String(updates?.status || '').toLowerCase() === 'cancelled') {
+      const { data, error } = await _sb.rpc('cancel_authenticated_booking', {
+        p_booking_ref: ref,
+        p_payment_status: updates.paymentStatus ?? null,
+        p_reason: updates.cancellationReason || updates.forfeitureReason || 'Cancelled by dashboard user',
+      });
+      if (error) { console.error('cancelAuthenticatedBooking:', error); throw error; }
+      if (!data || data.status !== 'cancelled' || data.released !== true) {
+        const releaseError = new Error(`Booking ${ref} cancellation was not confirmed by the server.`);
+        releaseError.code = 'BOOKING_RELEASE_NOT_CONFIRMED';
+        throw releaseError;
+      }
+      _pbClearFastCache(['bookings']);
+      return data;
+    }
+
     // Map only the fields provided (camelCase â†’ snake_case)
     const row = {};
     if (updates.status    !== undefined) row.status = updates.status;

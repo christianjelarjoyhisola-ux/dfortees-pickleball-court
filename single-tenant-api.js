@@ -190,6 +190,9 @@
         p_access_token: accessToken,
         p_reason: updates.cancellationReason || 'Cancelled by guest',
       });
+      if (cancelled?.status !== 'cancelled' || cancelled?.released !== true) {
+        throw new Error('The booking cancellation was not confirmed. Please try again.');
+      }
       forgetAccess(reference);
       window.DB.clearCache?.(['bookings']);
       return cancelled;
@@ -217,6 +220,9 @@
       p_access_token: accessToken,
       p_reason: 'Cancelled by guest',
     });
+    if (result?.status !== 'cancelled' || result?.released !== true) {
+      throw new Error('The booking cancellation was not confirmed. Please try again.');
+    }
     forgetAccess(reference);
     window.DB.clearCache?.(['bookings']);
     return result;

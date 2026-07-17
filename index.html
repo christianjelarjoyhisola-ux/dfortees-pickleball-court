@@ -5556,12 +5556,30 @@ async function maybeResumeGuestBooking() {
   toast('Your reserved booking was restored. Continue before the timer ends.', 'ok');
 }
 
-function cancelReservedBookings(refs = reservedRefs()) {
+async function cancelReservedBookings(refs = reservedRefs()) {
   const uniqueRefs = [...new Set((refs || []).filter(Boolean))];
-  clearReservationState();
-  return Promise.allSettled(uniqueRefs.map(ref =>
-    DB.updateBooking(ref, { status: 'cancelled', paymentStatus: 'rejected' }).catch(() => {})
+  if (!uniqueRefs.length) {
+    clearReservationState();
+    return [];
+  }
+
+  const results = await Promise.allSettled(uniqueRefs.map(ref =>
+    DB.updateBooking(ref, {
+      status: 'cancelled',
+      paymentStatus: 'rejected',
+      cancellationReason: 'Temporary reservation cancelled by guest',
+    })
   ));
+  const failures = results.filter(result => result.status === 'rejected');
+  if (failures.length) {
+    const firstError = failures[0].reason;
+    console.error('cancelReservedBookings:', firstError);
+    throw firstError instanceof Error
+      ? firstError
+      : new Error('The reserved court time could not be released. Please try again.');
+  }
+  clearReservationState();
+  return results;
 }
 
 function clearSelectedBookingUi() {
@@ -5892,7 +5910,9 @@ function closeBookModal() {
   stopSlotCountdown();
   // Cancel the reservation if the user closes without submitting, then refresh
   // the affected grids so temporary "Processing..." slots become available.
-  if (reservedRefs().length) releaseReservedBookingViews(itemsToRelease).catch(() => {});
+  if (reservedRefs().length) releaseReservedBookingViews(itemsToRelease).catch(error => {
+    toast(`Could not release the reserved time: ${extractErrMsg(error)}`, 'err');
+  });
   else clearSelectedBookingUi();
 }
 
