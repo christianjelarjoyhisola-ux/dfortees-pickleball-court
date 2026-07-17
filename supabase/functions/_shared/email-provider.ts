@@ -24,6 +24,7 @@ type MailerooConfig = {
 
 const MAILEROO_ENDPOINT = "https://smtp.maileroo.com/api/v2/emails";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PRODUCTION_SENDER_DOMAIN = "dforteespickleball.com";
 
 function requiredEnv(name: string): string {
   const value = (Deno.env.get(name) || "").trim();
@@ -37,6 +38,10 @@ export function assertEmailProviderConfigured(): MailerooConfig {
 
   const fromAddress = requiredEnv("MAILEROO_FROM_EMAIL").toLowerCase();
   if (!EMAIL_PATTERN.test(fromAddress)) throw new Error("MAILEROO_FROM_EMAIL is invalid");
+  const senderDomain = fromAddress.split("@").at(-1);
+  if (senderDomain !== PRODUCTION_SENDER_DOMAIN) {
+    throw new Error(`MAILEROO_FROM_EMAIL must use the verified ${PRODUCTION_SENDER_DOMAIN} domain`);
+  }
 
   return {
     apiKey: requiredEnv("MAILEROO_API_KEY"),

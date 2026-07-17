@@ -37,7 +37,16 @@ test("Maileroo configuration is explicit and keeps secrets server-side", () => {
   assert.match(source, /Deno\.env\.get\("MAILEROO_FROM_NAME"\)/);
 
   assert.match(source, /provider !== "maileroo"/);
+  assert.match(source, /PRODUCTION_SENDER_DOMAIN = "dforteespickleball\.com"/);
+  assert.match(source, /senderDomain !== PRODUCTION_SENDER_DOMAIN/);
   assert.doesNotMatch(source, /console\.(?:log|info|debug).*apiKey/i);
+});
+
+test("production email cannot fall back to Maileroo's shared sandbox domain", () => {
+  const source = read(providerPath);
+
+  assert.match(source, /MAILEROO_FROM_EMAIL must use the verified/);
+  assert.doesNotMatch(read(".env.example"), /MAILEROO_FROM_EMAIL=.*maileroo\.org/i);
 });
 
 test("every active booking email function uses the shared adapter", () => {
