@@ -4,11 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>D’fortees Pickleball Court — Book Your Court</title>
-<link rel="icon" type="image/jpeg" href="logodfortees.jpg" />
+<link rel="icon" type="image/png" href="logonewnew.png" />
 <script src="booking-balance.js?v=20260716-host-balance-v1"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="brand.css?v=20260716-4" />
-<script src="brand-config.js" defer></script>
+<script src="brand-config.js?v=20260717-logo-v2" defer></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; -webkit-text-size-adjust:100%; text-size-adjust:100%; touch-action:manipulation; }
@@ -2690,7 +2690,7 @@ body.host-mode .courts { padding-bottom:140px; }
   <div class="welcome-stage">
     <header class="welcome-identity" aria-label="D’fortees Pickleball Court">
       <div class="welcome-emblem" aria-hidden="true">
-        <img src="logodfortees.jpg" data-brand-logo alt="" />
+        <img src="logonewnew.png" data-brand-logo alt="" />
       </div>
       <p class="welcome-kicker">Pickleball Court · Montevista</p>
     </header>
@@ -2816,7 +2816,7 @@ body.host-mode .courts { padding-bottom:140px; }
 
 <nav class="nav">
   <div class="logo">
-    <img class="logo-img" src="logodfortees.jpg" data-brand-logo alt="D’fortees Pickleball Court logo" />
+    <img class="logo-img" src="logonewnew.png" data-brand-logo alt="D’fortees Pickleball Court logo" />
     <span class="logo-tx">
       <span class="logo-name" data-brand-name>D’fortees Pickleball Court</span>
       <span class="logo-sub" data-brand-location>Montevista, Davao de Oro</span>
@@ -3206,7 +3206,7 @@ body.host-mode .courts { padding-bottom:140px; }
             <div class="bpay-ref-card">
               <div class="bpay-window" id="bPayWindow" style="display:none">
                 <span>⏳</span>
-                <div><strong>Payment window:</strong> <span>pay between</span> <strong id="bPayWindowStart">--</strong> and <strong id="bPayWindowEnd">--</strong> PH.</div>
+                <div><strong>15-minute payment window:</strong> <span>pay between</span> <strong id="bPayWindowStart">--</strong> and <strong id="bPayWindowEnd">--</strong> PH.</div>
               </div>
               <div class="bpay-ref-head">
                 <label class="bpay-ref-label">
@@ -3290,7 +3290,7 @@ body.host-mode .courts { padding-bottom:140px; }
   <div class="ft-g">
     <div>
       <div class="logo">
-        <img class="logo-img" src="logodfortees.jpg" data-brand-logo alt="D’fortees Pickleball Court logo" />
+        <img class="logo-img" src="logonewnew.png" data-brand-logo alt="D’fortees Pickleball Court logo" />
         <span class="logo-tx">
           <span class="logo-name" data-brand-name>D’fortees Pickleball Court</span>
           <span class="logo-sub" data-brand-location>Montevista, Davao de Oro</span>
@@ -4935,12 +4935,20 @@ function formatPhTime12(date) {
 function updatePaymentWindowText() {
   const wrap = $('bPayWindow');
   if (!wrap) return;
-  const started = _reservationStartedAt ? new Date(_reservationStartedAt) : null;
+  const expires = _reservationExpiresAt ? new Date(_reservationExpiresAt) : null;
+  const hasValidExpiry = expires && !Number.isNaN(expires.getTime());
+  const started = hasValidExpiry
+    ? new Date(expires.getTime() - RESERVATION_MINUTES * 60 * 1000)
+    : _reservationStartedAt
+      ? new Date(_reservationStartedAt)
+      : null;
   if (!started || Number.isNaN(started.getTime())) {
     wrap.style.display = 'none';
     return;
   }
-  const ends = new Date(started.getTime() + RESERVATION_MINUTES * 60 * 1000);
+  const ends = hasValidExpiry
+    ? expires
+    : new Date(started.getTime() + RESERVATION_MINUTES * 60 * 1000);
   if ($('bPayWindowStart')) $('bPayWindowStart').textContent = formatPhTime12(started);
   if ($('bPayWindowEnd')) $('bPayWindowEnd').textContent = formatPhTime12(ends);
   wrap.style.display = '';
@@ -5353,6 +5361,7 @@ function updateCardUI(courtId) {
 let _reservedRef = null;
 let _reservedRefs = [];
 let _reservationStartedAt = null;
+let _reservationExpiresAt = null;
 let _countdownInterval = null;
 const RESERVATION_MINUTES = 15;
 const GUEST_RESUME_KEY = 'df_guest_booking_resume_v1';
@@ -5365,13 +5374,30 @@ function clearReservationState() {
   _reservedRef = null;
   _reservedRefs = [];
   _reservationStartedAt = null;
+  _reservationExpiresAt = null;
   clearGuestBookingResume();
 }
 
-function reservationSecondsLeft(startedAt = _reservationStartedAt) {
+function reservationDeadlineMs(expiresAt = _reservationExpiresAt, startedAt = _reservationStartedAt) {
+  const expiresMs = new Date(expiresAt || '').getTime();
+  if (Number.isFinite(expiresMs)) return expiresMs;
   const startedMs = new Date(startedAt || '').getTime();
-  if (!Number.isFinite(startedMs)) return RESERVATION_MINUTES * 60;
-  return Math.max(0, Math.ceil(((startedMs + RESERVATION_MINUTES * 60 * 1000) - Date.now()) / 1000));
+  return Number.isFinite(startedMs)
+    ? startedMs + RESERVATION_MINUTES * 60 * 1000
+    : NaN;
+}
+
+function reservationSecondsLeft(expiresAt = _reservationExpiresAt, startedAt = _reservationStartedAt) {
+  const deadlineMs = reservationDeadlineMs(expiresAt, startedAt);
+  if (!Number.isFinite(deadlineMs)) return RESERVATION_MINUTES * 60;
+  return Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+}
+
+function earliestReservationExpiry(values = []) {
+  const valid = values
+    .map(value => new Date(value || '').getTime())
+    .filter(Number.isFinite);
+  return valid.length ? new Date(Math.min(...valid)).toISOString() : null;
 }
 
 function guestResumeFormDraft() {
@@ -5389,12 +5415,13 @@ function guestResumeFormDraft() {
 
 function saveGuestBookingResume(extra = {}) {
   const refs = reservedRefs();
-  if (!refs.length || !_reservationStartedAt) return;
+  if (!refs.length || (!_reservationStartedAt && !_reservationExpiresAt)) return;
   try {
     localStorage.setItem(GUEST_RESUME_KEY, JSON.stringify({
       refs,
       primaryRef: refs[0],
       startedAt: _reservationStartedAt,
+      expiresAt: _reservationExpiresAt,
       savedAt: new Date().toISOString(),
       form: guestResumeFormDraft(),
       ...extra,
@@ -5475,7 +5502,7 @@ async function maybeResumeGuestBooking() {
   const resume = readGuestBookingResume();
   if (!resume) return;
 
-  if (reservationSecondsLeft(resume.startedAt) <= 0) {
+  if (reservationSecondsLeft(resume.expiresAt, resume.startedAt) <= 0) {
     await Promise.allSettled(resume.refs.map(ref =>
       DB.updateBooking(ref, { status: 'cancelled', paymentStatus: 'rejected' }).catch(() => {})
     ));
@@ -5496,6 +5523,10 @@ async function maybeResumeGuestBooking() {
   _reservedRefs = rows.map(b => b.ref);
   _reservedRef = _reservedRefs[0] || null;
   _reservationStartedAt = resume.startedAt;
+  _reservationExpiresAt = earliestReservationExpiry([
+    ...rows.map(row => row.holdExpiresAt),
+    resume.expiresAt,
+  ]);
 
   const primary = bookingItems[0];
   if (primary) {
@@ -5521,7 +5552,7 @@ async function maybeResumeGuestBooking() {
   hideHostInvite({ restoreScroll: false });
   const resumeStep = Math.min(5, Math.max(3, Number(resume.form?.step || 3)));
   wizGoTo(resumeStep);
-  startSlotCountdown(reservationSecondsLeft(resume.startedAt));
+  startSlotCountdown(reservationSecondsLeft(_reservationExpiresAt, resume.startedAt));
   toast('Your reserved booking was restored. Continue before the timer ends.', 'ok');
 }
 
@@ -5566,6 +5597,8 @@ async function releaseReservedBookingViews(items = activeBookingItems()) {
 // slots free themselves automatically instead of getting stuck forever.
 function isHeldVerifying(b) {
   if (b.status !== 'verifying') return false;
+  const expiresMs = new Date(b.holdExpiresAt || '').getTime();
+  if (Number.isFinite(expiresMs)) return expiresMs > Date.now();
   if (!b.createdAt) return true; // no timestamp → treat as fresh hold
   return (Date.now() - new Date(b.createdAt).getTime()) < RESERVATION_MINUTES * 60 * 1000;
 }
@@ -5669,6 +5702,9 @@ async function proceedToBookLegacy(courtId) {
   // ── Lock the slot NOW before showing the form ─────────────────────────
   const reserveRef = genRef();
   const reserveStartedAt = new Date().toISOString();
+  const reserveFallbackExpiresAt = new Date(
+    new Date(reserveStartedAt).getTime() + RESERVATION_MINUTES * 60 * 1000
+  ).toISOString();
   const reserveIdentity = hostBookingIdentity();
   const reserveData = {
     ref:           reserveRef,
@@ -5690,12 +5726,14 @@ async function proceedToBookLegacy(courtId) {
     paymentStatus: 'for_verification',
     status:        'verifying',
     createdAt:     reserveStartedAt,
+    holdExpiresAt: reserveFallbackExpiresAt,
     downpayment:   null,
     gcashRef:      null,
     ...reserveIdentity,
   };
+  let reserveResult = null;
   try {
-    await DB.addBooking(reserveData);
+    reserveResult = await DB.addBooking(reserveData);
   } catch (err) {
     const msg = err?.message || '';
     if (msg.toLowerCase().includes('no longer available') || msg.toLowerCase().includes('already booked')) {
@@ -5708,6 +5746,7 @@ async function proceedToBookLegacy(courtId) {
   }
   _reservedRef = reserveRef;
   _reservationStartedAt = reserveStartedAt;
+  _reservationExpiresAt = reserveResult?.holdExpiresAt || reserveFallbackExpiresAt;
 
   selSlots = [...cardSel.slots];
   await refreshBookingItemViews([reserveData]);
@@ -5774,13 +5813,17 @@ async function proceedToBook(courtId = null) {
 
   const groupRef = bookingSelections.length > 1 ? genRef() + '-G' : null;
   const reserveStartedAt = new Date().toISOString();
+  const reserveFallbackExpiresAt = new Date(
+    new Date(reserveStartedAt).getTime() + RESERVATION_MINUTES * 60 * 1000
+  ).toISOString();
   const reserveIdentity = hostBookingIdentity();
   const reserveItems = bookingSelections.map(sel => makeBookingItemFromSelection(sel, genRef(), groupRef));
   const createdRefs = [];
+  const reserveExpiries = [];
 
   try {
     for (const item of reserveItems) {
-      await DB.addBooking({
+      const reserveResult = await DB.addBooking({
         ref:           item.ref,
         groupRef:      item.groupRef,
         fullName:      'Reserving...',
@@ -5801,10 +5844,12 @@ async function proceedToBook(courtId = null) {
         paymentStatus: 'for_verification',
         status:        'verifying',
         createdAt:     reserveStartedAt,
+        holdExpiresAt: reserveFallbackExpiresAt,
         downpayment:   null,
         gcashRef:      null,
         ...reserveIdentity,
       });
+      reserveExpiries.push(reserveResult?.holdExpiresAt || reserveFallbackExpiresAt);
       createdRefs.push(item.ref);
     }
   } catch (err) {
@@ -5823,6 +5868,7 @@ async function proceedToBook(courtId = null) {
   _reservedRefs = reserveItems.map(item => item.ref);
   _reservedRef = _reservedRefs[0] || null;
   _reservationStartedAt = reserveStartedAt;
+  _reservationExpiresAt = earliestReservationExpiry(reserveExpiries) || reserveFallbackExpiresAt;
   saveGuestBookingResume();
   selSlots = [...primary.slots];
   await refreshBookingItemViews(reserveItems);
@@ -5859,15 +5905,19 @@ function startSlotCountdown(initialSeconds = null) {
   banner.style.display = 'flex';
   banner.classList.remove('urgent');
   const hasResumeSeconds = initialSeconds !== null && initialSeconds !== undefined && Number.isFinite(Number(initialSeconds));
-  let secsLeft = hasResumeSeconds
+  const fallbackSeconds = hasResumeSeconds
     ? Math.max(0, Math.floor(Number(initialSeconds)))
     : RESERVATION_MINUTES * 60;
+  const fallbackDeadlineMs = Date.now() + fallbackSeconds * 1000;
   function fmt(s) {
     const m = Math.floor(s / 60), sec = s % 60;
     return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
   }
   function tick() {
     updatePaymentWindowText();
+    const serverDeadlineMs = reservationDeadlineMs();
+    const deadlineMs = Number.isFinite(serverDeadlineMs) ? serverDeadlineMs : fallbackDeadlineMs;
+    const secsLeft = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
     const t = fmt(secsLeft);
     if (timeEl) timeEl.textContent = t;
     if (bigEl)  bigEl.textContent  = t;
@@ -5880,7 +5930,6 @@ function startSlotCountdown(initialSeconds = null) {
       closeBookModal();
       return;
     }
-    secsLeft--;
   }
   tick();
   _countdownInterval = setInterval(tick, 1000);
@@ -7055,6 +7104,7 @@ async function submitBookingLegacy(e) {
       if (savedBooking?.bookingReference) booking.ref = savedBooking.bookingReference;
       _reservedRef = null;
       _reservationStartedAt = null;
+      _reservationExpiresAt = null;
     } else {
       // Fallback: no prior reservation (e.g. wizard flow) — insert fresh.
       const savedBooking = await DB.addBooking(booking);

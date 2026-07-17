@@ -17,6 +17,13 @@ export default {
       });
     }
 
+    // Cached copies of the previous brand configuration may still request the
+    // former logo URL. Always resolve that legacy path to the current brand so
+    // repeat visitors cannot see a mixture of old and new logos.
+    if (url.pathname === '/logodfortees.jpg') {
+      return Response.redirect(new URL('/logonewnew.png', url).toString(), 301);
+    }
+
     // Cloudflare Pages resolves extensionless HTML routes through the asset
     // binding. Redirecting /host to /host.html here conflicts with Pages'
     // canonical /host.html -> /host redirect and creates a redirect loop.

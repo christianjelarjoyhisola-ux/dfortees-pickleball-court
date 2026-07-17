@@ -4,13 +4,13 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
 <title>D’fortees Pickleball Court — Admin Dashboard</title>
-<link rel="icon" type="image/jpeg" href="logodfortees.jpg" />
+<link rel="icon" type="image/png" href="logonewnew.png" />
 <script src="chart.min.js"></script>
 <script src="booking-balance.js?v=20260716-host-balance-v1"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="brand.css?v=20260716-4"/>
-<script src="brand-config.js" defer></script>
+<script src="brand-config.js?v=20260717-logo-v2" defer></script>
 <style>
 /* ── DESIGN TOKENS ─────────────────────────────────────── */
 :root {
@@ -2051,7 +2051,7 @@ tr:hover td { background: var(--bg2); }
 <!-- TOP NAV -->
 <nav class="topnav">
   <div class="nav-brand" onclick="window.location.href='index.html'">
-    <img class="logo-img" src="logodfortees.jpg" data-brand-logo alt="D’fortees Pickleball Court logo" />
+    <img class="logo-img" src="logonewnew.png" data-brand-logo alt="D’fortees Pickleball Court logo" />
     D’fortees Pickleball Court <span class="brand-accent">Admin</span>
   </div>
   <div class="nav-actions">
@@ -4087,7 +4087,7 @@ function receiptFlagsForDisplay(b){
 
   const age = Number(ex.receiptAgeMinutes);
   const earlyTolerance = Number(ex.allowedPaymentEarlyToleranceMinutes ?? 2);
-  const windowMinutes = Number(ex.allowedPaymentWindowMinutes ?? 10);
+  const windowMinutes = Number(ex.allowedPaymentWindowMinutes ?? 15);
   if (Number.isFinite(age) && age >= -earlyTolerance) {
     flags = removeReceiptFlags(flags, ['TIME_FUTURE']);
   }

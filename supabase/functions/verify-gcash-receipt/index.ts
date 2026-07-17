@@ -35,7 +35,7 @@ const corsHeaders = {
 
 // Payment must happen within this many minutes after the booking/session join
 // is started.
-const PAYMENT_WINDOW_MINUTES = 10;
+const PAYMENT_WINDOW_MINUTES = 15;
 // OCR usually reads only minute-level timestamps. A receipt paid during the
 // same minute as the hold can look a few seconds "before" the booking.
 const PAYMENT_EARLY_TOLERANCE_MINUTES = 2;
@@ -95,7 +95,7 @@ function publicReceiptMessage(
     flagSet.has("TIME_EXPIRED") || flagSet.has("TIME_FUTURE") ||
     flagSet.has("DATE_NOT_TODAY")
   ) {
-    return "Payment was sent outside the allowed 10-minute window. Please create a new booking.";
+    return "Payment was sent outside the allowed 15-minute window. Please create a new booking.";
   }
   if (flagSet.has("IMAGE_UNREADABLE") || flagSet.has("OCR_UNAVAILABLE")) {
     return "Receipt image is unreadable. Please upload a clearer screenshot.";
@@ -314,6 +314,24 @@ function parseReceiptDateTime(
   }
 
   return { date: dateStr, shifted: null };
+}
+
+function appendPaymentWindowFlags(
+  flags: string[],
+  receiptDate: string | null,
+  receiptDateTime: Date | null,
+  bookingStartedAt: Date | null,
+  receiptAgeMinutes: number | null,
+): void {
+  if (!receiptDate) flags.push("DATE_UNREADABLE");
+
+  if (!receiptDateTime || !bookingStartedAt || receiptAgeMinutes == null) {
+    flags.push("TIME_UNREADABLE");
+  } else if (receiptAgeMinutes < -PAYMENT_EARLY_TOLERANCE_MINUTES) {
+    flags.push("TIME_FUTURE");
+  } else if (receiptAgeMinutes > PAYMENT_WINDOW_MINUTES) {
+    flags.push("TIME_EXPIRED");
+  }
 }
 
 function digitsOnly(s: string): string {
@@ -1522,8 +1540,9 @@ Deno.serve(async (req) => {
 
       if (provider === "gcash") {
         // GCash-to-GCash focused path. The receipt layout is consistent but OCR
-        // can miss the small right-aligned timestamp, so unreadable date/time is
-        // not a failure for GCash. Parsed dates/times are still enforced.
+        // can miss the small right-aligned timestamp. An unreadable timestamp
+        // must go to manual review; only a readable in-window timestamp can be
+        // auto-approved.
         if (!extractedRef && !flags.includes("REF_FORMAT_INVALID")) {
           flags.push("REF_FORMAT_INVALID");
         } else if (typedRef && extractedRef && extractedRef !== typedRef) {
@@ -1533,22 +1552,10 @@ Deno.serve(async (req) => {
         if (!pricingError && extractedAmount == null) {
           flags.push("AMOUNT_UNREADABLE");
         } else if (
-          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+          !pricingError && extractedAmount != null &&
+          extractedAmount < expectedAmount - PESO_TOLERANCE
         ) {
           flags.push("AMOUNT_MISMATCH");
-        }
-
-        if (
-          receiptDate && bookingStartedDate &&
-          receiptDate !== bookingStartedDate
-        ) flags.push("DATE_NOT_TODAY");
-        if (receiptDateTime && bookingStartedAt) {
-          if (
-            (receiptAgeMinutes as number) < -PAYMENT_EARLY_TOLERANCE_MINUTES
-          ) flags.push("TIME_FUTURE");
-          else if ((receiptAgeMinutes as number) > PAYMENT_WINDOW_MINUTES) {
-            flags.push("TIME_EXPIRED");
-          }
         }
 
         if (!isGcashToGcashReceipt(ocrText)) {
@@ -1573,22 +1580,10 @@ Deno.serve(async (req) => {
         if (!pricingError && extractedAmount == null) {
           flags.push("AMOUNT_UNREADABLE");
         } else if (
-          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+          !pricingError && extractedAmount != null &&
+          extractedAmount < expectedAmount - PESO_TOLERANCE
         ) {
           flags.push("AMOUNT_MISMATCH");
-        }
-
-        if (!receiptDate) flags.push("DATE_UNREADABLE");
-        else if (bookingStartedDate && receiptDate !== bookingStartedDate) {
-          flags.push("DATE_NOT_TODAY");
-        }
-        if (!receiptDateTime) flags.push("TIME_UNREADABLE");
-        else if (!bookingStartedAt) flags.push("TIME_UNREADABLE");
-        else if (
-          (receiptAgeMinutes as number) < -PAYMENT_EARLY_TOLERANCE_MINUTES
-        ) flags.push("TIME_FUTURE");
-        else if ((receiptAgeMinutes as number) > PAYMENT_WINDOW_MINUTES) {
-          flags.push("TIME_EXPIRED");
         }
 
         if (!hasBdoPayIndicator(ocrText)) flags.push("BDO_PAY_UNREADABLE");
@@ -1606,26 +1601,14 @@ Deno.serve(async (req) => {
         if (!pricingError && extractedAmount == null) {
           flags.push("AMOUNT_UNREADABLE");
         } else if (
-          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+          !pricingError && extractedAmount != null &&
+          extractedAmount < expectedAmount - PESO_TOLERANCE
         ) {
           // Maya's flattened OCR can still turn a damaged/split thousands
           // value into a plausible smaller number. Keep the booking pending
           // for an owner to compare with the stored image; never auto-approve
           // the short amount and never auto-cancel from this heuristic alone.
           flags.push("AMOUNT_REVIEW");
-        }
-
-        if (!receiptDate) flags.push("DATE_UNREADABLE");
-        else if (bookingStartedDate && receiptDate !== bookingStartedDate) {
-          flags.push("DATE_NOT_TODAY");
-        }
-        if (!receiptDateTime) flags.push("TIME_UNREADABLE");
-        else if (!bookingStartedAt) flags.push("TIME_UNREADABLE");
-        else if (
-          (receiptAgeMinutes as number) < -PAYMENT_EARLY_TOLERANCE_MINUTES
-        ) flags.push("TIME_FUTURE");
-        else if ((receiptAgeMinutes as number) > PAYMENT_WINDOW_MINUTES) {
-          flags.push("TIME_EXPIRED");
         }
 
         if (!hasMayaIndicator(ocrText)) flags.push("MAYA_UNREADABLE");
@@ -1646,22 +1629,10 @@ Deno.serve(async (req) => {
         if (!pricingError && extractedAmount == null) {
           flags.push("AMOUNT_UNREADABLE");
         } else if (
-          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+          !pricingError && extractedAmount != null &&
+          extractedAmount < expectedAmount - PESO_TOLERANCE
         ) {
           flags.push("AMOUNT_MISMATCH");
-        }
-
-        if (!receiptDate) flags.push("DATE_UNREADABLE");
-        else if (bookingStartedDate && receiptDate !== bookingStartedDate) {
-          flags.push("DATE_NOT_TODAY");
-        }
-        if (!receiptDateTime) flags.push("TIME_UNREADABLE");
-        else if (!bookingStartedAt) flags.push("TIME_UNREADABLE");
-        else if (
-          (receiptAgeMinutes as number) < -PAYMENT_EARLY_TOLERANCE_MINUTES
-        ) flags.push("TIME_FUTURE");
-        else if ((receiptAgeMinutes as number) > PAYMENT_WINDOW_MINUTES) {
-          flags.push("TIME_EXPIRED");
         }
 
         if (!hasBpiIndicator(ocrText)) flags.push("BPI_UNREADABLE");
@@ -1683,13 +1654,25 @@ Deno.serve(async (req) => {
         if (!pricingError && extractedAmount == null) {
           flags.push("AMOUNT_UNREADABLE");
         } else if (
-          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+          !pricingError && extractedAmount != null &&
+          extractedAmount < expectedAmount - PESO_TOLERANCE
         ) {
           flags.push("AMOUNT_MISMATCH");
         }
       }
 
       // Authenticity heuristics — HARD: a non-receipt image should be rejected outright.
+      // Every supported provider follows the same 15-minute rule. Missing OCR
+      // date/time evidence is uncertain and therefore routes to manual review;
+      // a readable timestamp outside the window remains a hard rejection.
+      appendPaymentWindowFlags(
+        flags,
+        receiptDate,
+        receiptDateTime,
+        bookingStartedAt,
+        receiptAgeMinutes,
+      );
+
       if (!looksLikeGcashReceipt(ocrText)) flags.push("SUSPECTED_FAKE");
     }
     if (editedBySoftware(bytes)) flags.push("EDITED_METADATA");

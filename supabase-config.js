@@ -447,6 +447,7 @@ function rowToBooking(r) {
     receiptConfidence: r.receipt_confidence != null ? Number(r.receipt_confidence) : null,
     receiptImageUrl:   r.receipt_image_url || null,
     receiptVerifiedAt: r.receipt_verified_at || null,
+    holdExpiresAt: r.hold_expires_at || null,
     billedAt:      r.billed_at || null,
     weeklyFeeId:   r.weekly_fee_id || null,
     confirmationEmailId: r.confirmation_email_id || null,
@@ -493,6 +494,10 @@ const PB_RESERVATION_HOLD_MINUTES = 15;
 function bookingHoldsSlotForConflict(b) {
   if (!b || b.status === 'cancelled' || b.status === 'forfeited') return false;
   if (b.status !== 'verifying') return true;
+
+  const expires = b.hold_expires_at || b.holdExpiresAt;
+  const expiresMs = new Date(expires || '').getTime();
+  if (Number.isFinite(expiresMs)) return expiresMs > Date.now();
 
   const created = b.created_at || b.createdAt;
   if (!created) return true;
@@ -549,6 +554,7 @@ function bookingToRow(b) {
     created_by_name:    b.createdByName || null,
     created_by_email:   b.createdByEmail || null,
     status:         b.status,
+    hold_expires_at: b.holdExpiresAt || null,
     created_at:     b.createdAt,
   };
 }
@@ -816,7 +822,7 @@ window.DB = {
     // Check for slot conflicts before inserting
     const { data: existing } = await _sb
       .from('bookings')
-      .select('ref, status, slots, created_at')
+      .select('ref, status, slots, hold_expires_at, created_at')
       .eq('court_id', booking.courtId)
       .eq('date', booking.date)
       .neq('status', 'cancelled')

@@ -5,7 +5,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const LOGO_URL = Deno.env.get("PUBLIC_LOGO_URL") || "";
+const LOGO_URL = Deno.env.get("PUBLIC_LOGO_URL") ||
+  "https://dfortees-pickleball-court.pages.dev/logonewnew.png";
 
 type Payload = {
   bookingRef: string;

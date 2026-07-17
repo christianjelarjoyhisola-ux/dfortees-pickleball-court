@@ -11,7 +11,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 const JSON_HEADERS = { ...corsHeaders, "Content-Type": "application/json" };
-const LOGO_URL = Deno.env.get("PUBLIC_LOGO_URL") || "";
+const LOGO_URL = Deno.env.get("PUBLIC_LOGO_URL") ||
+  "https://dfortees-pickleball-court.pages.dev/logonewnew.png";
 const DAY_MS = 86_400_000;
 
 type BookingRow = {

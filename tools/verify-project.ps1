@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 try {
-  $checkFiles = @('booking-balance.js', 'brand-config.js', 'supabase-config.js', 'single-tenant-api.js', '_worker.js', 'tools/local-server.js', 'single-tenant-schema-contract.test.js', 'single-tenant-bridge-contract.test.js')
+  $checkFiles = @('booking-balance.js', 'brand-config.js', 'supabase-config.js', 'single-tenant-api.js', '_worker.js', 'tools/local-server.js', 'single-tenant-schema-contract.test.js', 'single-tenant-bridge-contract.test.js', 'payment-window-contract.test.js', 'brand-deployment-contract.test.js')
   foreach ($file in $checkFiles) {
     & node --check $file
     if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $file" }

@@ -5,7 +5,7 @@ window.DFORTEES_BRAND = Object.freeze({
   name: "D'fortees Pickleball Court",
   shortName: "D'fortees",
   wordmark: "D’FORTEES",
-  logo: 'logodfortees.jpg',
+  logo: 'logonewnew.png',
   tagline: 'Play bold. Book easy.',
   location: 'Montevista, Davao de Oro',
   address: 'Prk-4 National Highway, 8801 Montevista',

@@ -43,7 +43,7 @@ const publicFiles = new Set([
   'host.html',
   'index.html',
   'login.html',
-  'logodfortees.jpg',
+  'logonewnew.png',
   'single-tenant-api.js',
   'supabase-config.js',
   'supabase.min.js',
