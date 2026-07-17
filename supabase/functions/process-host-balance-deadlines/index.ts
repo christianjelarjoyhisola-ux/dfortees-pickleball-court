@@ -13,7 +13,7 @@ const corsHeaders = {
 };
 const JSON_HEADERS = { ...corsHeaders, "Content-Type": "application/json" };
 const LOGO_URL = Deno.env.get("PUBLIC_LOGO_URL") ||
-  "https://dfortees-pickleball-court.pages.dev/logonewnew.png";
+  "https://dforteespickleball.com/logonewnew.png";
 const DAY_MS = 86_400_000;
 
 type BookingRow = {

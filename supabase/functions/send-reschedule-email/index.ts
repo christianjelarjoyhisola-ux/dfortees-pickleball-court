@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 const LOGO_URL = Deno.env.get("PUBLIC_LOGO_URL") ||
-  "https://dfortees-pickleball-court.pages.dev/logonewnew.png";
+  "https://dforteespickleball.com/logonewnew.png";
 
 type Payload = {
   bookingRef: string;

@@ -48,7 +48,8 @@ test('local preview, Pages build, direct deploy, and email fallbacks include the
     'supabase/functions/process-host-balance-deadlines/index.ts',
   ]) {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
-    assert.match(source, new RegExp(`dfortees-pickleball-court\\.pages\\.dev/${logoName.replace('.', '\\.')}`));
+    assert.match(source, new RegExp(`dforteespickleball\\.com/${logoName.replace('.', '\\.')}`));
+    assert.doesNotMatch(source, /dfortees-pickleball-court\.pages\.dev/);
   }
 });
 
