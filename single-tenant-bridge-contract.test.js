@@ -85,7 +85,7 @@ test('only validated active dashboard roles use the authenticated legacy adapter
   assert.doesNotMatch(bridge, /sb\.auth\.getSession\(\)/);
 });
 
-test('runtime configuration is public-only and contains no hardcoded live backend', () => {
+test('runtime configuration is public-only and locked to the reviewed backend', () => {
   const config = read('supabase-config.js');
   const worker = read('_worker.js');
   assert.match(config, /window\.PB_RUNTIME_CONFIG/);
@@ -101,5 +101,11 @@ test('runtime configuration is public-only and contains no hardcoded live backen
     'i',
   );
   assert.doesNotMatch(config + bridge + worker, privateCredentialPattern);
-  assert.doesNotMatch(config + bridge + worker, /https:\/\/[a-z0-9-]+\.supabase\.co/i);
+  assert.doesNotMatch(config + bridge, /https:\/\/[a-z0-9-]+\.supabase\.co/i);
+  const workerProjectUrls = [...worker.matchAll(/https:\/\/[a-z0-9-]+\.supabase\.co/gi)]
+    .map(match => match[0]);
+  assert.deepEqual(
+    [...new Set(workerProjectUrls)],
+    ['https://ebykgvvjsuawawdheyil.supabase.co'],
+  );
 });

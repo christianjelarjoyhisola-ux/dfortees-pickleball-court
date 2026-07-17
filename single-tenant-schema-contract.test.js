@@ -41,25 +41,26 @@ function functionContract(name, signaturePattern) {
   assert.match(sql, new RegExp(`grant execute on function public\\.${name}\\(${signaturePattern}\\) to anon, authenticated;`, 'i'));
 }
 
-test('fresh database bundle applies single-tenant hardening before receipt rate limiting', () => {
+test('fresh database bundle is guarded and excludes one-time setting repairs', () => {
   const builder = fs.readFileSync(path.join(root, 'tools', 'build-fresh-database-bundle.ps1'), 'utf8');
   assert.match(builder, new RegExp(`supabase\\\\migrations\\\\${migrationName.replaceAll('.', '\\.')}[^)]*\\)`, 'i'));
   assert.doesNotMatch(builder, /platform\\supabase|multitenant|multi-tenant/i);
   const hardeningPosition = builder.indexOf(migrationName);
   const limiterPosition = builder.indexOf('20260717143000_receipt_verification_rate_limit.sql');
-  const pricingRepairPosition = builder.indexOf(pricingRepairName);
-  const feeRepairPosition = builder.indexOf(feeRepairName);
   const serviceRoleRepairPosition = builder.indexOf(serviceRoleRepairName);
   assert.ok(hardeningPosition >= 0 && limiterPosition > hardeningPosition);
-  assert.ok(pricingRepairPosition > limiterPosition, 'pricing repair must follow receipt hardening');
-  assert.ok(feeRepairPosition > pricingRepairPosition, 'fee repair must follow pricing repair');
   assert.ok(
-    serviceRoleRepairPosition > feeRepairPosition,
+    serviceRoleRepairPosition > limiterPosition,
     'service-role repair must be the latest bundled migration',
   );
+  assert.doesNotMatch(builder, new RegExp(pricingRepairName.replaceAll('.', '\\.')));
+  assert.doesNotMatch(builder, new RegExp(feeRepairName.replaceAll('.', '\\.')));
+  assert.match(builder, /to_regclass\('public\.settings'\) is not null/i);
+  assert.match(builder, /to_regclass\('public\.courts'\) is not null/i);
+  assert.match(builder, /REFUSED: D''fortees fresh database SQL cannot run on an existing application database/i);
 });
 
-test('the forward booking-fee repair is idempotent and booking-safe', () => {
+test('the historical one-time booking-fee repair is booking-safe and not replayable', () => {
   for (const key of ['maintenance_fee', 'service_fee_rate', 'booking_fee']) {
     assert.match(
       compactFeeRepairSql,
@@ -91,7 +92,7 @@ test('trusted Edge Functions retain explicit service-role database privileges', 
   assert.doesNotMatch(serviceRoleRepairSql, /\bgrant\b[^;]*\bto\s+(?:anon|authenticated)\b/i);
 });
 
-test('the forward pricing repair is idempotent, booking-safe, and server-verified', () => {
+test('the historical one-time pricing repair is booking-safe and not replayable', () => {
   const canonicalSchedule = /\[{"from":6,"to":18,"rate":60},{"from":18,"to":24,"rate":90}\]/;
 
   assert.match(compactPricingRepairSql, /if not exists \(select 1 from public\.courts where id = 'c1'\) then/i);

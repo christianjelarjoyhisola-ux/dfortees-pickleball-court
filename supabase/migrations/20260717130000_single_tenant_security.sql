@@ -1109,6 +1109,9 @@ grant select on public.courts, public.blocked_dates, public.settings to authenti
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
+-- HISTORICAL ONE-TIME FRESH-INSTALL NORMALIZATION.
+-- Never replay this section on the live project. Admin-saved court and setting
+-- values are authoritative after initial installation.
 -- Replace the generic starter records with the real D'fortees venue only.
 delete from public.courts
 where id in ('c1','c2')

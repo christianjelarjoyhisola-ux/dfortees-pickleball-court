@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 try {
-  $checkFiles = @('booking-balance.js', 'brand-config.js', 'supabase-config.js', 'single-tenant-api.js', '_worker.js', 'tools/local-server.js', 'single-tenant-schema-contract.test.js', 'single-tenant-bridge-contract.test.js', 'payment-window-contract.test.js', 'brand-deployment-contract.test.js')
+  $checkFiles = @('booking-balance.js', 'brand-config.js', 'supabase-config.js', 'single-tenant-api.js', '_worker.js', 'tools/local-server.js', 'single-tenant-schema-contract.test.js', 'single-tenant-bridge-contract.test.js', 'payment-window-contract.test.js', 'brand-deployment-contract.test.js', 'settings-preservation-contract.test.js')
   foreach ($file in $checkFiles) {
     & node --check $file
     if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $file" }
@@ -38,7 +38,16 @@ try {
   if ($legacyMatches) { throw "Legacy brand identifiers remain in runtime code: $($legacyMatches -join ', ')" }
 
   $configTargets = @('supabase-config.js', 'single-tenant-api.js', '_worker.js', 'deploy-edge-functions.ps1', 'deploy-cloudflare-pages.ps1', 'supabase/migrations/20260717130000_single_tenant_security.sql')
-  $blockedPatterns = @('https://[a-z0-9-]+\.supabase\.co', 'eyJ[A-Za-z0-9._-]{40,}', 'ca-pub-1871576789265012')
+  $expectedPublicSupabaseUrl = 'https://ebykgvvjsuawawdheyil.supabase.co'
+  foreach ($configTarget in $configTargets) {
+    $configText = [System.IO.File]::ReadAllText((Join-Path $repoRoot $configTarget), [System.Text.Encoding]::UTF8)
+    foreach ($urlMatch in [regex]::Matches($configText, 'https://[a-z0-9-]+\.supabase\.co')) {
+      if ($urlMatch.Value -ne $expectedPublicSupabaseUrl) {
+        throw "Unexpected Supabase project URL in $configTarget."
+      }
+    }
+  }
+  $blockedPatterns = @('eyJ[A-Za-z0-9._-]{40,}', 'ca-pub-1871576789265012')
   foreach ($pattern in $blockedPatterns) {
     $matches = & rg -i -l $pattern @configTargets 2>$null
     if ($matches) { throw "Blocked legacy or live configuration found for pattern '$pattern': $($matches -join ', ')" }

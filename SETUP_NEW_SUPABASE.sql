@@ -16,6 +16,22 @@
 -- and RPCs. The Remittances UI is not ready until both SQL files succeed.
 -- ============================================================
 
+-- Refuse accidental use as an update script. Existing D'fortees operational
+-- settings and records are authoritative and must never be normalized by this
+-- fresh-install baseline.
+do $dfortees_setup_guard$
+begin
+  if to_regclass('public.settings') is not null
+     or to_regclass('public.courts') is not null
+     or to_regclass('public.bookings') is not null
+     or to_regclass('public.accounts') is not null then
+    raise exception using
+      errcode = '55000',
+      message = 'REFUSED: SETUP_NEW_SUPABASE.sql is fresh-install only and cannot update an existing database.';
+  end if;
+end;
+$dfortees_setup_guard$;
+
 create extension if not exists pgcrypto;
 
 -- ============================================================

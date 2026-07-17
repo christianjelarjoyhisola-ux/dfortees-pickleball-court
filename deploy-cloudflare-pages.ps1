@@ -44,6 +44,7 @@ $branchName = if ($envMap["CLOUDFLARE_PAGES_BRANCH"]) { $envMap["CLOUDFLARE_PAGE
 
 $runtimeUrl = [string]$envMap["PB_SUPABASE_URL"]
 $runtimeKey = [string]$envMap["PB_SUPABASE_PUBLISHABLE_KEY"]
+$expectedSupabaseUrl = "https://ebykgvvjsuawawdheyil.supabase.co"
 $backendConfigured = $runtimeUrl -match '^https://[a-z0-9]+\.supabase\.co$' -and
   $runtimeKey -match '^sb_publishable_'
 
@@ -52,6 +53,8 @@ if (-not $backendConfigured) {
     throw "Set PB_SUPABASE_URL and PB_SUPABASE_PUBLISHABLE_KEY in .env.local, or use -AllowDemoMode."
   }
   Write-Warning "Deploying D'fortees in browser-only demo mode. Data will be local to each visitor's browser."
+} elseif ($runtimeUrl.TrimEnd('/') -ne $expectedSupabaseUrl) {
+  throw "Refusing to point D'fortees at a different Supabase project. Saved live settings must remain on $expectedSupabaseUrl."
 } elseif ($runtimeUrl -match "ebykgvvjsuawawdheyil" -and -not $AllowDevelopmentBackend) {
   throw "The backend is the Free development project. Pass -AllowDevelopmentBackend only for an intentional non-production preview."
 } elseif ($runtimeUrl -match 'korte') {

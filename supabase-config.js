@@ -1358,7 +1358,10 @@ window.DB = {
   async getSettings() {
     return _pbCached('settings', {}, PB_FAST_CACHE_MS.settings, async () => {
       const { data, error } = await _sb.from('settings').select('*');
-      if (error) { console.error('getSettings:', error); return {}; }
+      if (error) {
+        console.error('getSettings:', error);
+        throw new Error('Could not load saved system settings. Nothing was changed.');
+      }
       const out = {};
       data.forEach(r => out[r.key] = r.value);
       return out;
@@ -1366,8 +1369,19 @@ window.DB = {
   },
 
   async saveSetting(key, value) {
-    const { error } = await _sb.from('settings').upsert({ key, value });
+    const { error } = await _sb.from('settings').upsert({ key, value }, { onConflict: 'key' });
     if (error) { console.error('saveSetting:', error); throw error; }
+    _pbClearFastCache(['settings']);
+  },
+
+  async saveSettings(values) {
+    const rows = Object.entries(values || {}).map(([key, value]) => ({
+      key: String(key),
+      value: value == null ? '' : String(value),
+    }));
+    if (!rows.length) return;
+    const { error } = await _sb.from('settings').upsert(rows, { onConflict: 'key' });
+    if (error) { console.error('saveSettings:', error); throw error; }
     _pbClearFastCache(['settings']);
   },
 
@@ -2623,6 +2637,11 @@ window.DB = {
     async saveSetting(key, value) {
       const db = readDb();
       db.settings[key] = value;
+      writeDb(db);
+    },
+    async saveSettings(values) {
+      const db = readDb();
+      for (const [key, value] of Object.entries(values || {})) db.settings[key] = value;
       writeDb(db);
     },
     clearCache() {},

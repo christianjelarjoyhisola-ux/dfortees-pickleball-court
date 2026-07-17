@@ -6,20 +6,21 @@ Cloudflare Pages site. It is not a multi-tenant platform and it does not reuse
 another venue's database, users, credentials, bookings, GitHub integration, or
 deployment configuration.
 
-## Current venue configuration
+## Venue identity and live configuration
 
 - Venue: D'fortees Pickleball Court
 - Address: Prk-4 National Highway, 8801 Montevista
 - Timezone: `Asia/Manila`
-- Court: one outdoor court
-- Court rate: ₱60/hour from 6:00 AM to 6:00 PM
-- Court rate: ₱90/hour from 6:00 PM to midnight
-- Booking fee: ₱5 per reserved hour
-- Payment method: cash at the front desk
 
-Digital payment methods and automatic payment webhooks are disabled. The
-database seed contains no demo bookings, fake transactions, placeholder courts,
-or test accounts.
+Court rates, operating hours, booking fees, payment methods, merchant details,
+QR images, Open Play configuration, blocked dates, and court availability are
+live operational settings stored in Supabase. Values saved through the admin
+system are authoritative and must be preserved across every code, UI, function,
+and Cloudflare update. Source-code seed values are for the first installation of
+a new empty project only; they must never be reapplied to the live database.
+
+The fresh database seed contains no demo bookings, fake transactions,
+placeholder courts, or test accounts.
 
 ## Architecture and security
 
@@ -73,7 +74,9 @@ powershell -ExecutionPolicy Bypass -File tools/build-fresh-database-bundle.ps1 `
 ```
 
 Review and apply `.generated/dfortees-fresh-database.sql` to that empty project.
-Never apply the bundle to another venue or an existing production database.
+The generated SQL contains an executable guard that aborts when D'fortees
+application tables already exist. Never remove or bypass that guard, and never
+apply the bundle to another venue or an existing production database.
 The removed `setup-db.js` and `create-accounts.js` scripts are obsolete and must
 not be restored or used.
 
@@ -99,6 +102,12 @@ Function types when Deno is available, runtime assets, legacy brand references,
 possible committed secrets, and the expected Git remote.
 
 ## Deployment
+
+Normal updates are data-preserving. Do not run the fresh database bundle or
+historical repair migrations during a website or Edge Function deployment.
+Before and after any intentional database migration, snapshot and compare the
+live `settings`, `courts`, `accounts`, and booking record counts. New migrations
+must be additive unless the user explicitly requests a particular data change.
 
 - Edge Functions: use `deploy-edge-functions.ps1`, which is locked to the
   isolated D'fortees project and deploys only the reviewed allowlist documented

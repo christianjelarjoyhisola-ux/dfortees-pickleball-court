@@ -2,10 +2,17 @@ export default {
   fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/runtime-config.js') {
+      const expectedSupabaseUrl = 'https://ebykgvvjsuawawdheyil.supabase.co';
+      const configuredSupabaseUrl = String(env.PB_SUPABASE_URL || '').replace(/\/+$/, '');
+      const isExpectedProject = configuredSupabaseUrl === expectedSupabaseUrl;
       const config = {
-        supabaseUrl: env.PB_SUPABASE_URL || 'https://dfortees-backend.invalid',
+        supabaseUrl: isExpectedProject
+          ? expectedSupabaseUrl
+          : 'https://dfortees-backend.invalid',
         supabasePublishableKey:
-          env.PB_SUPABASE_PUBLISHABLE_KEY || 'DFORTEES_SUPABASE_PUBLISHABLE_KEY_NOT_CONFIGURED',
+          isExpectedProject && env.PB_SUPABASE_PUBLISHABLE_KEY
+            ? env.PB_SUPABASE_PUBLISHABLE_KEY
+            : 'DFORTEES_SUPABASE_PUBLISHABLE_KEY_NOT_CONFIGURED',
       };
       const serialized = JSON.stringify(config).replaceAll('<', '\\u003c');
       return new Response(`window.PB_RUNTIME_CONFIG = Object.freeze(${serialized});\n`, {

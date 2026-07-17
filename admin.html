@@ -3045,7 +3045,7 @@ tr:hover td { background: var(--bg2); }
 
         <div class="fg" style="margin-bottom:14px">
           <label class="fl">Payment Acceptance Mode</label>
-          <select class="fi" id="paymentAcceptanceModeSelect" style="font-size:.84rem" onchange="savePaymentSettings()">
+          <select class="fi" id="paymentAcceptanceModeSelect" style="font-size:.84rem">
             <option value="both">Accept Downpayment (Full Fee + 50% Court) or Full Payment</option>
             <option value="downpayment_only">Downpayment Only (Full Fee + 50% Court)</option>
             <option value="full_payment_only">Full Payment Only (100%)</option>
@@ -3165,7 +3165,7 @@ tr:hover td { background: var(--bg2); }
         </div>
 
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">
-          <button class="btn btn-p btn-sm" onclick="savePaymentSettings()">💾 Save Payment Settings</button>
+          <button class="btn btn-p btn-sm" id="savePaymentSettingsBtn" onclick="savePaymentSettings()" disabled>💾 Save Payment Settings</button>
           <span id="paySettingsSummary" style="font-size:.78rem;color:var(--muted)"></span>
         </div>
       </div>
@@ -4496,11 +4496,15 @@ function startAdminRealtime(){
       }catch(_){}
     },300);
   };
+  const rerenderSettings=()=>{
+    DB.clearCache?.(['settings']);
+    rerender();
+  };
   _supabase.channel('admin-rt')
     .on('postgres_changes',{event:'*',schema:'public',table:'bookings'},rerender)
     .on('postgres_changes',{event:'*',schema:'public',table:'deleted_booking_archive'},rerender)
     .on('postgres_changes',{event:'*',schema:'public',table:'courts'},rerender)
-    .on('postgres_changes',{event:'*',schema:'public',table:'settings'},rerender)
+    .on('postgres_changes',{event:'*',schema:'public',table:'settings'},rerenderSettings)
     .on('postgres_changes',{event:'*',schema:'public',table:'blocked_dates'},rerender)
     .on('postgres_changes',{event:'*',schema:'public',table:'open_play_registrations'},rerender)
     .on('postgres_changes',{event:'*',schema:'public',table:'open_play_host_applications'},rerender)
@@ -4646,8 +4650,10 @@ async function saveMaintRate() {
   if (isNaN(val) || val < 0) { toast('Please enter a valid rate (0 or more).', 'err'); return; }
   const feeType = document.querySelector('input[name="feeType"]:checked')?.value || 'per_hour';
   try {
-    await DB.saveSetting('maintenance_fee', String(val));
-    await DB.saveSetting('fee_type', feeType);
+    await DB.saveSettings({
+      maintenance_fee: String(val),
+      fee_type: feeType,
+    });
     _maintRate = val;
     await renderMaintFee();
     const sum = $('maintRateSummary');
@@ -7193,8 +7199,10 @@ async function saveHours() {
   if (closeHr <= openHr) { toast('Close time must be later than open time.', 'err'); return; }
   if (closeHr - openHr < 1) { toast('Must have at least 1 hour of operation.', 'err'); return; }
   try {
-    await DB.saveSetting('open_hour',  String(openHr));
-    await DB.saveSetting('close_hour', String(closeHr));
+    await DB.saveSettings({
+      open_hour: String(openHr),
+      close_hour: String(closeHr),
+    });
     updateHoursSummary(openHr, closeHr);
     toast(`Hours saved: ${fmtH(openHr)} – ${fmtH(closeHr)}`);
   } catch(e) {
@@ -7319,16 +7327,32 @@ async function renderIntegrationStatus() {
   }
 }
 
+let _paymentSettingsLoaded = false;
+
 async function renderPaymentSettings() {
   if (!Auth.can('payments', sess.role)) { toast('You do not have access to this section.', 'err'); return; }
-  const settings = await DB.getSettings();
-  const cashOn = settings.payment_method_cash !== '0';
-  const gcashOn = settings.payment_method_gcash !== '0';
-  const bdopayOn = settings.payment_method_bdopay !== '0';
-  const mayaOn = settings.payment_method_maya !== '0';
-  const bpiOn = settings.payment_method_bpi !== '0';
-  const gotymeOn = settings.payment_method_gotyme !== '0';
-  const pnbOn = settings.payment_method_pnb !== '0';
+  _paymentSettingsLoaded = false;
+  const saveButton = $('savePaymentSettingsBtn');
+  if (saveButton) saveButton.disabled = true;
+  if ($('paySettingsSummary')) $('paySettingsSummary').textContent = 'Loading saved settings…';
+
+  let settings;
+  try {
+    settings = await DB.getSettings();
+  } catch (error) {
+    console.error('renderPaymentSettings:', error);
+    if ($('paySettingsSummary')) $('paySettingsSummary').textContent = 'Saved settings could not be loaded. Nothing was changed.';
+    toast('Could not load saved payment settings. Nothing was changed.', 'err');
+    return;
+  }
+
+  const cashOn = settings.payment_method_cash === '1';
+  const gcashOn = settings.payment_method_gcash === '1';
+  const bdopayOn = settings.payment_method_bdopay === '1';
+  const mayaOn = settings.payment_method_maya === '1';
+  const bpiOn = settings.payment_method_bpi === '1';
+  const gotymeOn = settings.payment_method_gotyme === '1';
+  const pnbOn = settings.payment_method_pnb === '1';
   const paymentAcceptanceMode = settings.payment_acceptance_mode || 'both';
 
   if ($('paymentAcceptanceModeSelect')) $('paymentAcceptanceModeSelect').value = paymentAcceptanceMode;
@@ -7355,19 +7379,19 @@ async function renderPaymentSettings() {
   }
 
   const gcashQr = settings.gcash_qr_image || '';
-  if (gcashQr && $('gcashQrPreview')) {
+  if ($('gcashQrPreview')) {
     $('gcashQrPreview').src = gcashQr;
-    $('gcashQrPreviewWrap').style.display = '';
+    $('gcashQrPreviewWrap').style.display = gcashQr ? '' : 'none';
   }
   const gotymeQr = settings.gotyme_qr_image || '';
-  if (gotymeQr && $('gotymeQrPreview')) {
+  if ($('gotymeQrPreview')) {
     $('gotymeQrPreview').src = gotymeQr;
-    $('gotymeQrPreviewWrap').style.display = '';
+    $('gotymeQrPreviewWrap').style.display = gotymeQr ? '' : 'none';
   }
   const pnbQr = settings.pnb_qr_image || '';
-  if (pnbQr && $('pnbQrPreview')) {
+  if ($('pnbQrPreview')) {
     $('pnbQrPreview').src = pnbQr;
-    $('pnbQrPreviewWrap').style.display = '';
+    $('pnbQrPreviewWrap').style.display = pnbQr ? '' : 'none';
   }
 
   const summaryParts = [`Methods: ${(cashOn?'Cash ':'')}${(gcashOn?'GCash ':'')}${(bdopayOn?'BDO Pay ':'')}${(mayaOn?'Maya ':'')}${(bpiOn?'BPI ':'')}${(gotymeOn?'GoTyme ':'')}${(pnbOn?'PNB':'')}`.trim() || 'none'];
@@ -7380,6 +7404,8 @@ async function renderPaymentSettings() {
     $('platformRemSummary').textContent = pn ? `Receiving via GCash: ${pn}${pnm ? ' (' + pnm + ')' : ''}` : 'Not configured yet — court owners cannot pay until set.';
   }
 
+  _paymentSettingsLoaded = true;
+  if (saveButton) saveButton.disabled = false;
   renderIntegrationStatus().catch(() => {});
 }
 /* ==============================================
@@ -8299,10 +8325,13 @@ async function savePlatformRemittance() {
   const num = ($('platformGcashNumInput')?.value || '').trim();
   const name = ($('platformGcashNameInput')?.value || '').trim();
   try {
-    await DB.saveSetting('platform_gcash_number', num);
-    await DB.saveSetting('platform_gcash_name', name);
     const qrSrc = $('platformGcashQrPreview')?.src || '';
-    if (qrSrc.startsWith('data:')) await DB.saveSetting('platform_gcash_qr', qrSrc);
+    const values = {
+      platform_gcash_number: num,
+      platform_gcash_name: name,
+    };
+    if (qrSrc.startsWith('data:')) values.platform_gcash_qr = qrSrc;
+    await DB.saveSettings(values);
     await renderPaymentSettings();
     toast('✅ Platform remittance saved.');
   } catch (e) {
@@ -8394,6 +8423,10 @@ function handleQrUpload(type, e) {
 
 async function savePaymentSettings() {
   if (!Auth.can('payments', sess.role)) { toast('You do not have access to edit payment settings.', 'err'); return; }
+  if (!_paymentSettingsLoaded) {
+    toast('Saved payment settings are not loaded. Nothing was changed.', 'err');
+    return;
+  }
   const cashOn = $('payMethodCashOn').checked;
   const gcashOn = $('payMethodGcashOn').checked;
   const bdopayOn = $('payMethodBdopayOn')?.checked || false;
@@ -8407,45 +8440,52 @@ async function savePaymentSettings() {
     return;
   }
 
+  const saveButton = $('savePaymentSettingsBtn');
+  if (saveButton) saveButton.disabled = true;
   try {
     const paymentAcceptanceMode = $('paymentAcceptanceModeSelect')?.value || 'both';
     
-    await DB.saveSetting('payment_method_cash', cashOn ? '1' : '0');
-    await DB.saveSetting('payment_method_gcash', gcashOn ? '1' : '0');
-    await DB.saveSetting('payment_method_bdopay', bdopayOn ? '1' : '0');
-    await DB.saveSetting('payment_method_maya', mayaOn ? '1' : '0');
-    await DB.saveSetting('payment_method_bpi', bpiOn ? '1' : '0');
-    await DB.saveSetting('payment_method_gotyme', gotymeOn ? '1' : '0');
-    await DB.saveSetting('payment_method_pnb', pnbOn ? '1' : '0');
-    await DB.saveSetting('payment_acceptance_mode', paymentAcceptanceMode);
-
     const gcashNum = $('gcashNumInput')?.value.trim() || '';
     const gcashName = $('gcashNameInput')?.value.trim() || '';
     const gotymeNum = $('gotymeNumInput')?.value.trim() || '';
     const gotymeName = $('gotymeNameInput')?.value.trim() || '';
     const pnbNum = $('pnbNumInput')?.value.trim() || '';
     const pnbName = $('pnbNameInput')?.value.trim() || '';
-    await DB.saveSetting('gcash_merchant_number', gcashNum);
-    await DB.saveSetting('gcash_merchant_name', gcashName);
-    await DB.saveSetting('gotyme_merchant_number', gotymeNum);
-    await DB.saveSetting('gotyme_merchant_name', gotymeName);
-    await DB.saveSetting('pnb_merchant_number', pnbNum);
-    await DB.saveSetting('pnb_merchant_name', pnbName);
+    const updates = {
+      payment_method_cash: cashOn ? '1' : '0',
+      payment_method_gcash: gcashOn ? '1' : '0',
+      payment_method_bdopay: bdopayOn ? '1' : '0',
+      payment_method_maya: mayaOn ? '1' : '0',
+      payment_method_bpi: bpiOn ? '1' : '0',
+      payment_method_gotyme: gotymeOn ? '1' : '0',
+      payment_method_pnb: pnbOn ? '1' : '0',
+      payment_acceptance_mode: paymentAcceptanceMode,
+      gcash_merchant_number: gcashNum,
+      gcash_merchant_name: gcashName,
+      gotyme_merchant_number: gotymeNum,
+      gotyme_merchant_name: gotymeName,
+      pnb_merchant_number: pnbNum,
+      pnb_merchant_name: pnbName,
+    };
 
-    // Save QR images (base64 data URLs) — save empty string if removed
-    const platformQrSrc = $('platformGcashQrPreview')?.src || '';
+    // Include only newly uploaded data URLs. Missing previews preserve the
+    // already saved QR settings instead of clearing them.
     const gcashQrSrc = $('gcashQrPreview')?.src || '';
     const gotymeQrSrc = $('gotymeQrPreview')?.src || '';
     const pnbQrSrc = $('pnbQrPreview')?.src || '';
-    if (platformQrSrc.startsWith('data:')) await DB.saveSetting('platform_gcash_qr', platformQrSrc);
-    if (gcashQrSrc.startsWith('data:')) await DB.saveSetting('gcash_qr_image', gcashQrSrc);
-    if (gotymeQrSrc.startsWith('data:')) await DB.saveSetting('gotyme_qr_image', gotymeQrSrc);
-    if (pnbQrSrc.startsWith('data:')) await DB.saveSetting('pnb_qr_image', pnbQrSrc);
+    if (gcashQrSrc.startsWith('data:')) updates.gcash_qr_image = gcashQrSrc;
+    if (gotymeQrSrc.startsWith('data:')) updates.gotyme_qr_image = gotymeQrSrc;
+    if (pnbQrSrc.startsWith('data:')) updates.pnb_qr_image = pnbQrSrc;
+
+    await DB.saveSettings(updates);
 
     await renderPaymentSettings();
     toast('✅ Payment settings saved!');
   } catch(e) {
+    console.error('savePaymentSettings:', e);
     toast('Failed to save payment settings.', 'err');
+  } finally {
+    if (saveButton && _paymentSettingsLoaded) saveButton.disabled = false;
   }
 }
 
