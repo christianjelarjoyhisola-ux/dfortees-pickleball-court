@@ -81,13 +81,36 @@ export function chooseExpectedDue(
   total: number,
   storedDownpayment: number,
   paymentAcceptanceMode: unknown,
+  explicitPartialDue?: number,
 ): number {
-  const half = roundMoney(total / 2);
+  const partialDue = explicitPartialDue === undefined
+    ? roundMoney(total / 2)
+    : roundMoney(explicitPartialDue);
+  if (
+    !Number.isFinite(partialDue) || partialDue < 0 ||
+    partialDue > roundMoney(total) + 0.01
+  ) {
+    throw new Error("Expected partial payment amount is invalid");
+  }
+  const legacyHalfTotal = roundMoney(total / 2);
   const mode = String(paymentAcceptanceMode || "both");
-  if (mode === "full_payment_only") return total;
-  if (mode === "downpayment_only") return half;
-  if (closeMoney(storedDownpayment, total)) return total;
-  if (closeMoney(storedDownpayment, half)) return half;
+  if (mode === "full_payment_only") {
+    if (closeMoney(storedDownpayment, total)) return total;
+    throw new Error("Stored payment amount does not match full-payment pricing");
+  }
+  if (mode !== "downpayment_only" && closeMoney(storedDownpayment, total)) {
+    return total;
+  }
+  if (closeMoney(storedDownpayment, partialDue)) return partialDue;
+  // Bookings created before the fee split was corrected stored 50% of the
+  // grand total. Honour that already-presented amount, but only for persisted
+  // bookings; all new bookings use the explicit court-plus-fee calculation.
+  if (
+    explicitPartialDue !== undefined &&
+    closeMoney(storedDownpayment, legacyHalfTotal)
+  ) {
+    return legacyHalfTotal;
+  }
   throw new Error("Stored payment amount does not match current pricing");
 }
 
@@ -134,10 +157,15 @@ export function calculateCourtPayment(
     );
   }
 
+  // Regular customers pay the booking/service fee in full plus half of the
+  // court charge. This keeps the non-court fee fully collected regardless of
+  // whether the customer chooses a downpayment or full payment.
+  const partialDue = roundMoney(courtTotal * 0.5 + serviceFee);
   const due = chooseExpectedDue(
     total,
     storedDownpayment,
     input.paymentAcceptanceMode,
+    partialDue,
   );
   return { courtTotal, serviceFee, total, due };
 }

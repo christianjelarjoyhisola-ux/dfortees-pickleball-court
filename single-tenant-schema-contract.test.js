@@ -6,6 +6,8 @@ const assert = require('node:assert/strict');
 const root = __dirname;
 const migrationName = '20260717130000_single_tenant_security.sql';
 const pricingRepairName = '20260717150000_restore_dfortees_pricing.sql';
+const feeRepairName = '20260717213000_restore_dfortees_booking_fee.sql';
+const serviceRoleRepairName = '20260717214500_restore_service_role_privileges.sql';
 const migrationPath = path.join(root, 'supabase', 'migrations', migrationName);
 const sql = fs.readFileSync(migrationPath, 'utf8');
 const compactSql = sql.replace(/\s+/g, ' ');
@@ -14,6 +16,16 @@ const pricingRepairSql = fs.readFileSync(
   'utf8',
 );
 const compactPricingRepairSql = pricingRepairSql.replace(/\s+/g, ' ');
+const feeRepairSql = fs.readFileSync(
+  path.join(root, 'supabase', 'migrations', feeRepairName),
+  'utf8',
+);
+const compactFeeRepairSql = feeRepairSql.replace(/\s+/g, ' ');
+const serviceRoleRepairSql = fs.readFileSync(
+  path.join(root, 'supabase', 'migrations', serviceRoleRepairName),
+  'utf8',
+);
+const compactServiceRoleRepairSql = serviceRoleRepairSql.replace(/\s+/g, ' ');
 
 function functionContract(name, signaturePattern) {
   const startPattern = new RegExp(`create or replace function public\\.${name}\\(`, 'i');
@@ -36,8 +48,47 @@ test('fresh database bundle applies single-tenant hardening before receipt rate 
   const hardeningPosition = builder.indexOf(migrationName);
   const limiterPosition = builder.indexOf('20260717143000_receipt_verification_rate_limit.sql');
   const pricingRepairPosition = builder.indexOf(pricingRepairName);
+  const feeRepairPosition = builder.indexOf(feeRepairName);
+  const serviceRoleRepairPosition = builder.indexOf(serviceRoleRepairName);
   assert.ok(hardeningPosition >= 0 && limiterPosition > hardeningPosition);
-  assert.ok(pricingRepairPosition > limiterPosition, 'pricing repair must be the latest bundled migration');
+  assert.ok(pricingRepairPosition > limiterPosition, 'pricing repair must follow receipt hardening');
+  assert.ok(feeRepairPosition > pricingRepairPosition, 'fee repair must follow pricing repair');
+  assert.ok(
+    serviceRoleRepairPosition > feeRepairPosition,
+    'service-role repair must be the latest bundled migration',
+  );
+});
+
+test('the forward booking-fee repair is idempotent and booking-safe', () => {
+  for (const key of ['maintenance_fee', 'service_fee_rate', 'booking_fee']) {
+    assert.match(
+      compactFeeRepairSql,
+      new RegExp(`\\('${key}', '5'\\)`, 'i'),
+    );
+  }
+  assert.match(compactFeeRepairSql, /\('fee_type', 'per_hour'\)/i);
+  assert.match(compactFeeRepairSql, /on conflict \(key\) do update/i);
+  assert.match(compactFeeRepairSql, /calculate_booking_service_fee\(array\['17'\]::text\[\]\)/i);
+  assert.match(compactFeeRepairSql, /v_fee is distinct from 5::numeric/i);
+  assert.doesNotMatch(
+    feeRepairSql,
+    /\b(?:insert\s+into|update|delete\s+from)\s+public\.(?:bookings|booking_slots)\b/i,
+    'fee repair must never mutate bookings or reserved slots',
+  );
+});
+
+test('trusted Edge Functions retain explicit service-role database privileges', () => {
+  assert.match(
+    compactServiceRoleRepairSql,
+    /grant select, insert, update, delete on all tables in schema public to service_role;/i,
+  );
+  assert.match(
+    compactServiceRoleRepairSql,
+    /grant usage, select on all sequences in schema public to service_role;/i,
+  );
+  assert.match(compactServiceRoleRepairSql, /has_table_privilege\('service_role', 'public\.bookings', 'SELECT'\)/i);
+  assert.match(compactServiceRoleRepairSql, /has_table_privilege\('service_role', 'public\.receipt_verifications', 'INSERT'\)/i);
+  assert.doesNotMatch(serviceRoleRepairSql, /\bgrant\b[^;]*\bto\s+(?:anon|authenticated)\b/i);
 });
 
 test('the forward pricing repair is idempotent, booking-safe, and server-verified', () => {

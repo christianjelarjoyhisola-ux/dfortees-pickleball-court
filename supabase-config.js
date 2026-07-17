@@ -198,11 +198,7 @@ async function _pbVerifyReceiptBase64Fallback(fnUrl, payload, imageFile) {
   };
   const res = await _pbFetchWithTimeout(fnUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-    },
+    headers: await _authRestHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(fallbackPayload),
   }, PB_RECEIPT_TIMEOUT_MS);
   const txt = await res.text();
@@ -1456,10 +1452,7 @@ window.DB = {
 
       const res = await _pbFetchWithTimeout(fnUrl, {
         method: 'POST',
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        },
+        headers: await _authRestHeaders(),
         body: form,
       }, PB_RECEIPT_TIMEOUT_MS);
       const txt = await res.text();

@@ -30,17 +30,73 @@ const base = {
   paymentAcceptanceMode: "both",
 };
 
-Deno.test("regular booking keeps the existing 50% downpayment", () => {
-  const amounts = calculateCourtPayment({ ...base, storedDownpayment: 420 });
+Deno.test("regular downpayment is 50% of court charges plus the full service fee", () => {
+  const amounts = calculateCourtPayment({ ...base, storedDownpayment: 440 });
   assertEquals(amounts.courtTotal, 800, "court total");
   assertEquals(amounts.serviceFee, 40, "service fee");
   assertEquals(amounts.total, 840, "booking total");
-  assertEquals(amounts.due, 420, "regular downpayment");
+  assertEquals(amounts.due, 440, "regular downpayment");
+});
+
+Deno.test("D'fortees regular downpayment collects the full booking fee", () => {
+  const amounts = calculateCourtPayment({
+    slots: [17],
+    courtRate: 60,
+    feeRate: 5,
+    feeType: "per_hour",
+    paymentAcceptanceMode: "both",
+    storedDownpayment: 35,
+  });
+  assertEquals(amounts.courtTotal, 60, "D'fortees court total");
+  assertEquals(amounts.serviceFee, 5, "D'fortees booking fee");
+  assertEquals(amounts.total, 65, "D'fortees booking total");
+  assertEquals(amounts.due, 35, "D'fortees regular downpayment");
 });
 
 Deno.test("regular booking still permits full payment", () => {
   const amounts = calculateCourtPayment({ ...base, storedDownpayment: 840 });
   assertEquals(amounts.due, 840, "full payment");
+});
+
+Deno.test("legacy half-total regular deposits remain verifiable", () => {
+  const amounts = calculateCourtPayment({ ...base, storedDownpayment: 420 });
+  assertEquals(amounts.due, 420, "grandfathered regular downpayment");
+});
+
+Deno.test("downpayment-only mode requires a valid partial amount", () => {
+  const amounts = calculateCourtPayment({
+    ...base,
+    paymentAcceptanceMode: "downpayment_only",
+    storedDownpayment: 440,
+  });
+  assertEquals(amounts.due, 440, "forced downpayment");
+  assertThrows(
+    () =>
+      calculateCourtPayment({
+        ...base,
+        paymentAcceptanceMode: "downpayment_only",
+        storedDownpayment: 840,
+      }),
+    "downpayment-only mode must reject an inconsistent stored amount",
+  );
+});
+
+Deno.test("full-payment-only mode requires the stored total", () => {
+  const amounts = calculateCourtPayment({
+    ...base,
+    paymentAcceptanceMode: "full_payment_only",
+    storedDownpayment: 840,
+  });
+  assertEquals(amounts.due, 840, "forced full payment");
+  assertThrows(
+    () =>
+      calculateCourtPayment({
+        ...base,
+        paymentAcceptanceMode: "full_payment_only",
+        storedDownpayment: 440,
+      }),
+    "full-payment-only mode must reject an inconsistent stored amount",
+  );
 });
 
 Deno.test("host due is 25% of court charges plus the full service fee", () => {

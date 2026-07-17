@@ -21,7 +21,6 @@
 // ----------------------------------------------------------------------------
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { Image } from "https://deno.land/x/imagescript@1.2.17/mod.ts";
 import { calculateCourtPayment, chooseExpectedDue, closeMoney, roundMoney, toNumber } from "../_shared/booking-payment.ts";
 import { extractReceiptAmount } from "../_shared/receipt-amount.ts";
 import {
@@ -53,6 +52,7 @@ const HARD_FLAGS = new Set([
   "SUSPECTED_FAKE", // OCR ran and image has zero receipt-like content
   "IMAGE_UNREADABLE", // OCR found NO text at all -> random/blank/non-receipt image
   "DUPLICATE_REF",
+  "DUPLICATE_IMAGE",
   "DUPLICATE_INVOICE",
   "DUPLICATE_INSTAPAY_REF",
   "DUPLICATE_BPI_TRANSACTION_REF",
@@ -141,6 +141,25 @@ function errMsg(err: unknown): string {
   }
 }
 
+function supabaseServerKey(): string {
+  const secretKeysJson = Deno.env.get("SUPABASE_SECRET_KEYS") || "";
+  if (secretKeysJson) {
+    try {
+      const parsed = JSON.parse(secretKeysJson) as Record<string, unknown>;
+      const preferred = String(parsed.default || "").trim();
+      if (preferred.startsWith("sb_secret_")) return preferred;
+      const available = Object.values(parsed).find((value) =>
+        String(value || "").trim().startsWith("sb_secret_")
+      );
+      if (available) return String(available).trim();
+    } catch {
+      console.error("SUPABASE_SECRET_KEYS could not be parsed");
+    }
+  }
+  return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
+    Deno.env.get("SERVICE_ROLE_KEY") || "";
+}
+
 type ReceiptAttemptClaim = {
   allowed: boolean;
   attemptsRemaining: number;
@@ -208,34 +227,6 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   );
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-}
-
-// Difference-hash (dHash): 64-bit perceptual hash robust to recompression and
-// light cropping/scaling. Returns 16-hex-char string, or null if undecodable.
-async function dHash(bytes: Uint8Array): Promise<string | null> {
-  try {
-    const img = await Image.decode(bytes);
-    const small = img.resize(9, 8); // 9x8 -> 8 horizontal comparisons per row
-    let bits = "";
-    for (let y = 1; y <= 8; y++) {
-      for (let x = 1; x <= 8; x++) {
-        const lPix = small.getPixelAt(x, y);
-        const rPix = small.getPixelAt(x + 1, y);
-        const lGray = ((lPix >>> 24) & 0xff) + ((lPix >>> 16) & 0xff) +
-          ((lPix >>> 8) & 0xff);
-        const rGray = ((rPix >>> 24) & 0xff) + ((rPix >>> 16) & 0xff) +
-          ((rPix >>> 8) & 0xff);
-        bits += lGray < rGray ? "1" : "0";
-      }
-    }
-    let hex = "";
-    for (let i = 0; i < 64; i += 4) {
-      hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
-    }
-    return hex;
-  } catch {
-    return null; // HEIC/unknown formats — skip perceptual dedupe, not fatal
-  }
 }
 
 function phManilaNow(): Date {
@@ -1044,15 +1035,18 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SERVICE_ROLE_KEY") ||
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-  if (!serviceRoleKey) return json({ error: "Missing SERVICE_ROLE_KEY" }, 500);
+  const serviceRoleKey = supabaseServerKey();
+  if (!serviceRoleKey) return json({ error: "Missing server database key" }, 500);
   const db = createClient(supabaseUrl, serviceRoleKey);
 
   const requestLength = Number(req.headers.get("content-length") || 0);
   if (Number.isFinite(requestLength) && requestLength > MAX_REQUEST_BYTES) {
     return json({ error: "Request too large" }, 413);
   }
+  console.log("receipt request received", {
+    requestLength,
+    contentType: req.headers.get("content-type") || "",
+  });
 
   let body: Record<string, unknown>;
   let uploadedImage: File | null = null;
@@ -1172,7 +1166,10 @@ Deno.serve(async (req) => {
       )
       .eq("ref", bookingRef)
       .maybeSingle();
-    if (bookingErr) return json({ error: "Booking could not be loaded" }, 500);
+    if (bookingErr) {
+      console.error("booking receipt lookup failed:", errMsg(bookingErr));
+      return json({ error: "Booking could not be loaded" }, 500);
+    }
 
     let booking: Record<string, unknown>;
     let inlinePricingKind: "open_play" | "host_session" | null = null;
@@ -1191,10 +1188,19 @@ Deno.serve(async (req) => {
       delete booking.guest_access_token;
       const persistedStatus = String(booking.status || "");
       const persistedPaymentStatus = String(booking.payment_status || "");
-      const terminal = ["confirmed", "cancelled", "completed"].includes(persistedStatus) ||
-        ["paid", "downpayment_paid", "rejected"].includes(persistedPaymentStatus);
-      if (terminal) {
-        const storedReceiptStatus = String(booking.receipt_status || "");
+      const storedReceiptStatus = String(booking.receipt_status || "");
+      const hasStoredReceipt = Boolean(
+        String(booking.receipt_image_url || "").trim(),
+      );
+      const hasCompletedVerification = Boolean(
+        String(booking.receipt_verified_at || "").trim(),
+      );
+      const receiptAlreadyProcessed = hasStoredReceipt &&
+        hasCompletedVerification &&
+        ["auto_approved", "manual_review", "rejected"].includes(
+          storedReceiptStatus,
+        );
+      if (receiptAlreadyProcessed) {
         const finalStatus = storedReceiptStatus === "rejected" || persistedStatus === "cancelled" || persistedPaymentStatus === "rejected"
           ? "rejected"
           : storedReceiptStatus === "manual_review"
@@ -1213,6 +1219,17 @@ Deno.serve(async (req) => {
           receiptVerifiedAt: booking.receipt_verified_at || null,
           message: "This booking has already been processed.",
         });
+      }
+      const closedWithoutCompletedReceipt =
+        ["confirmed", "cancelled", "completed"].includes(persistedStatus) ||
+        ["paid", "downpayment_paid", "rejected"].includes(
+          persistedPaymentStatus,
+        );
+      if (closedWithoutCompletedReceipt) {
+        return json({
+          error:
+            "This booking is already closed and has no completed receipt verification. Ask the owner to reopen it before uploading evidence.",
+        }, 409);
       }
       // Timing is the only field an inline payload may supplement for a saved
       // booking, and only when the persisted value is absent.
@@ -1384,14 +1401,43 @@ Deno.serve(async (req) => {
       bookingGroup.map((row) => String(row.ref || "")).filter(Boolean),
     );
 
-    // Hashes are stored for audit only. GCash validity is based on receipt details.
-    const phash = await dHash(bytes);
+    // Exact-byte replay detection is cheap and reliable. The current booking
+    // group is ignored so a customer can safely retry the same upload after a
+    // transient OCR or database failure.
+    let duplicateImage = false;
+    let imageHashLookupFailed = false;
+    const { data: sameHashRows, error: sameHashErr } = await db
+      .from("bookings")
+      .select("ref")
+      .eq("receipt_image_hash", imageHash)
+      .limit(100);
+    if (sameHashErr) {
+      imageHashLookupFailed = true;
+      console.error("receipt image replay lookup failed:", errMsg(sameHashErr));
+    } else {
+      duplicateImage = (sameHashRows || []).some((row: { ref?: unknown }) =>
+        !bookingGroupRefs.has(String(row.ref || ""))
+      );
+    }
+
+    // Reference/invoice uniqueness is authoritative. Perceptual image hashing
+    // was removed because decoding and resizing mobile screenshots consumed a
+    // large share of the Edge Function CPU budget without improving payment
+    // validity decisions.
+    const phash: string | null = null;
 
     // Google Vision still expects base64. Delay this allocation until after
     // Storage and the manual-review checkpoint have safely completed.
     if (!imageBase64) imageBase64 = bytesToBase64(bytes);
 
     const flags: string[] = [];
+
+    if (duplicateImage) flags.push("DUPLICATE_IMAGE");
+    if (imageHashLookupFailed) flags.push("DUPLICATE_CHECK_UNAVAILABLE");
+    if (pricingError) {
+      console.error("receipt pricing calculation failed:", pricingError);
+      flags.push("PRICING_UNAVAILABLE");
+    }
 
     // Do not flag duplicate-looking images. GCash/BDO Pay/Maya receipt screens
     // share the same layout, so perceptual image matching creates false flags.
@@ -1484,9 +1530,11 @@ Deno.serve(async (req) => {
           flags.push("REF_MISMATCH");
         }
 
-        if (pricingError) flags.push("AMOUNT_MISMATCH");
-        else if (extractedAmount == null) flags.push("AMOUNT_UNREADABLE");
-        else if (extractedAmount < expectedAmount - PESO_TOLERANCE) {
+        if (!pricingError && extractedAmount == null) {
+          flags.push("AMOUNT_UNREADABLE");
+        } else if (
+          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+        ) {
           flags.push("AMOUNT_MISMATCH");
         }
 
@@ -1522,9 +1570,11 @@ Deno.serve(async (req) => {
           flags.push("REF_MISMATCH");
         }
 
-        if (pricingError) flags.push("AMOUNT_MISMATCH");
-        else if (extractedAmount == null) flags.push("AMOUNT_UNREADABLE");
-        else if (extractedAmount < expectedAmount - PESO_TOLERANCE) {
+        if (!pricingError && extractedAmount == null) {
+          flags.push("AMOUNT_UNREADABLE");
+        } else if (
+          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+        ) {
           flags.push("AMOUNT_MISMATCH");
         }
 
@@ -1553,9 +1603,11 @@ Deno.serve(async (req) => {
           flags.push("REF_MISMATCH");
         }
 
-        if (pricingError) flags.push("AMOUNT_MISMATCH");
-        else if (extractedAmount == null) flags.push("AMOUNT_UNREADABLE");
-        else if (extractedAmount < expectedAmount - PESO_TOLERANCE) {
+        if (!pricingError && extractedAmount == null) {
+          flags.push("AMOUNT_UNREADABLE");
+        } else if (
+          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+        ) {
           // Maya's flattened OCR can still turn a damaged/split thousands
           // value into a plausible smaller number. Keep the booking pending
           // for an owner to compare with the stored image; never auto-approve
@@ -1591,9 +1643,11 @@ Deno.serve(async (req) => {
           flags.push("REF_MISMATCH");
         }
 
-        if (pricingError) flags.push("AMOUNT_MISMATCH");
-        else if (extractedAmount == null) flags.push("AMOUNT_UNREADABLE");
-        else if (extractedAmount < expectedAmount - PESO_TOLERANCE) {
+        if (!pricingError && extractedAmount == null) {
+          flags.push("AMOUNT_UNREADABLE");
+        } else if (
+          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+        ) {
           flags.push("AMOUNT_MISMATCH");
         }
 
@@ -1626,9 +1680,11 @@ Deno.serve(async (req) => {
           flags.push("REF_MISMATCH");
         }
 
-        if (pricingError) flags.push("AMOUNT_MISMATCH");
-        else if (extractedAmount == null) flags.push("AMOUNT_UNREADABLE");
-        else if (extractedAmount < expectedAmount - PESO_TOLERANCE) {
+        if (!pricingError && extractedAmount == null) {
+          flags.push("AMOUNT_UNREADABLE");
+        } else if (
+          !pricingError && extractedAmount < expectedAmount - PESO_TOLERANCE
+        ) {
           flags.push("AMOUNT_MISMATCH");
         }
       }
@@ -1780,6 +1836,34 @@ Deno.serve(async (req) => {
       expectedReceiverName: expectedName || null,
     };
 
+    // The audit record must exist before a booking can be approved or rejected.
+    // If durable audit storage is unavailable, keep the booking pending with
+    // its receipt attached so the owner can review it safely.
+    let receiptVerifiedAt: string | null = null;
+    const { error: auditErr } = await db.from("receipt_verifications").insert({
+      booking_ref: bookingRef,
+      result,
+      flags,
+      extracted,
+      confidence,
+      image_hash: imageHash,
+      phash,
+      raw_ocr_text: ocrText || null,
+    });
+    if (auditErr) {
+      console.error(
+        "receipt verification audit insert failed:",
+        errMsg(auditErr),
+      );
+      if (!flags.includes("AUDIT_PERSISTENCE_FAILED")) {
+        flags.push("AUDIT_PERSISTENCE_FAILED");
+      }
+      result = "manual_review";
+      confidence = 0.5;
+    } else {
+      receiptVerifiedAt = new Date().toISOString();
+    }
+
     // ── persist outcome on the booking ──────────────────────────────────────
     const statusUpdate: Record<string, unknown> = {};
     if (result === "auto_approved") {
@@ -1807,7 +1891,7 @@ Deno.serve(async (req) => {
       receipt_flags: flags,
       receipt_extracted: extracted,
       receipt_confidence: confidence,
-      receipt_verified_at: new Date().toISOString(),
+      receipt_verified_at: receiptVerifiedAt,
     };
 
     let finalUpdateError: string | null = null;
@@ -1927,17 +2011,6 @@ Deno.serve(async (req) => {
     }
 
     // ── audit trail (immutable) ─────────────────────────────────────────────
-    await db.from("receipt_verifications").insert({
-      booking_ref: bookingRef,
-      result,
-      flags,
-      extracted,
-      confidence,
-      image_hash: imageHash,
-      phash,
-      raw_ocr_text: ocrText || null,
-    });
-
     // ── alert admin on anything needing a human ─────────────────────────────
     if (result !== "auto_approved") {
       const icon = result === "rejected" ? "❌" : "⚠️";

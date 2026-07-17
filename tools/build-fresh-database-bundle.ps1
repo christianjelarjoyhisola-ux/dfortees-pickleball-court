@@ -19,7 +19,9 @@ $sources = @(
   'supabase\migrations\20260716120000_host_balance_deadlines.sql',
   'supabase\migrations\20260717130000_single_tenant_security.sql',
   'supabase\migrations\20260717143000_receipt_verification_rate_limit.sql',
-  'supabase\migrations\20260717150000_restore_dfortees_pricing.sql'
+  'supabase\migrations\20260717150000_restore_dfortees_pricing.sql',
+  'supabase\migrations\20260717213000_restore_dfortees_booking_fee.sql',
+  'supabase\migrations\20260717214500_restore_service_role_privileges.sql'
 )
 
 $missing = $sources | Where-Object { -not (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Leaf) }

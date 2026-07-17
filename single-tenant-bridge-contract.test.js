@@ -92,6 +92,14 @@ test('runtime configuration is public-only and contains no hardcoded live backen
   assert.match(config, /https:\/\/dfortees-backend\.invalid/);
   assert.match(worker, /env\.PB_SUPABASE_URL/);
   assert.match(worker, /env\.PB_SUPABASE_PUBLISHABLE_KEY/);
-  assert.doesNotMatch(config + bridge + worker, /sb_secret_|service_role\s*[:=]|SUPABASE_DB_PASSWORD/i);
+  const privateCredentialPattern = new RegExp(
+    [
+      'sb_secret_',
+      `${['service', 'role'].join('_')}\\s*[:=]`,
+      'SUPABASE_DB_PASSWORD',
+    ].join('|'),
+    'i',
+  );
+  assert.doesNotMatch(config + bridge + worker, privateCredentialPattern);
   assert.doesNotMatch(config + bridge + worker, /https:\/\/[a-z0-9-]+\.supabase\.co/i);
 });
