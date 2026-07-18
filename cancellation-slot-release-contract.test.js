@@ -7,6 +7,9 @@ const root = __dirname;
 const migrationName = '20260718090000_atomic_booking_cancellation.sql';
 const sql = fs.readFileSync(path.join(root, 'supabase', 'migrations', migrationName), 'utf8');
 const compactSql = sql.replace(/\s+/g, ' ');
+const guardFixName = '20260718094000_fix_guest_cancellation_guard.sql';
+const guardFixSql = fs.readFileSync(path.join(root, 'supabase', 'migrations', guardFixName), 'utf8');
+const guardFixCompactSql = guardFixSql.replace(/\s+/g, ' ');
 const dataLayer = fs.readFileSync(path.join(root, 'supabase-config.js'), 'utf8');
 const guestBridge = fs.readFileSync(path.join(root, 'single-tenant-api.js'), 'utf8');
 const customerUi = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -53,6 +56,15 @@ test('guest cancellation confirms the server release before clearing local acces
   assert.match(guestBridge, /result\?\.status !== 'cancelled' \|\| result\?\.released !== true/);
 });
 
+test('guest cancellation metadata does not trip the protected forfeiture guard', () => {
+  assert.match(guardFixCompactSql, /add column if not exists cancelled_at timestamptz/i);
+  assert.match(guardFixCompactSql, /add column if not exists cancellation_reason text/i);
+  assert.match(guardFixCompactSql, /cancelled_at = coalesce\(cancelled_at, now\(\)\)/i);
+  assert.match(guardFixCompactSql, /cancellation_reason = coalesce\(/i);
+  assert.doesNotMatch(guardFixSql, /set[\s\S]*?forfeiture_reason\s*=/i);
+  assert.match(guardFixCompactSql, /delete from public\.booking_slots where booking_ref = p_booking_ref;/i);
+});
+
 test('customer UI does not silently discard cancellation failures', () => {
   const start = customerUi.indexOf('async function cancelReservedBookings');
   const end = customerUi.indexOf('\nfunction clearSelectedBookingUi', start);
@@ -67,7 +79,9 @@ test('customer UI does not silently discard cancellation failures', () => {
 test('fresh database builds include the cancellation release before final grants', () => {
   const builder = fs.readFileSync(path.join(root, 'tools', 'build-fresh-database-bundle.ps1'), 'utf8');
   const cancellationPosition = builder.indexOf(migrationName);
+  const guardFixPosition = builder.indexOf(guardFixName);
   const serviceRolePosition = builder.indexOf('20260717214500_restore_service_role_privileges.sql');
   assert.ok(cancellationPosition >= 0, 'fresh bundle must include the cancellation migration');
-  assert.ok(serviceRolePosition > cancellationPosition, 'final service-role grants must remain last');
+  assert.ok(guardFixPosition > cancellationPosition, 'fresh bundle must include the guest cancellation guard fix');
+  assert.ok(serviceRolePosition > guardFixPosition, 'final service-role grants must remain last');
 });
