@@ -7,7 +7,7 @@
 <link rel="icon" type="image/png" href="logonewnew.png" />
 <script src="booking-balance.js?v=20260716-host-balance-v1"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="brand.css?v=20260716-4" />
+<link rel="stylesheet" href="brand.css?v=20260718-policy-v1" />
 <script src="brand-config.js?v=20260717-logo-v2" defer></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -2725,6 +2725,71 @@ body.host-mode .courts { padding-bottom:140px; }
   </div>
 </div>
 
+<!-- BOOKING POLICIES -->
+<div id="bookingPolicyScreen" class="booking-policy-screen" role="dialog" aria-modal="true" aria-labelledby="bookingPolicyTitle" aria-describedby="bookingPolicyIntro" aria-hidden="true" hidden>
+  <div class="booking-policy-glow booking-policy-glow-one" aria-hidden="true"></div>
+  <div class="booking-policy-glow booking-policy-glow-two" aria-hidden="true"></div>
+  <section class="booking-policy-panel" tabindex="-1">
+    <div class="booking-policy-meta">
+      <span class="booking-policy-kicker">Before you book</span>
+      <span class="booking-policy-duration">Quick read &middot; 2 policies</span>
+    </div>
+
+    <header class="booking-policy-header">
+      <span class="booking-policy-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.6 2.9 8.2 7 10 4.1-1.8 7-5.4 7-10V6l-7-3Z"></path><path d="m9 12 2 2 4-4"></path></svg>
+      </span>
+      <div>
+        <h2 id="bookingPolicyTitle">Please review our court policies</h2>
+        <p id="bookingPolicyIntro">A quick heads-up to keep every booking clear and fair.</p>
+      </div>
+    </header>
+
+    <div class="booking-policy-list">
+      <article class="booking-policy-card booking-policy-card-reminder">
+        <div class="booking-policy-card-heading">
+          <span class="booking-policy-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M6 4h12v16H6z"></path><path d="M9 8h6M9 12h6M9 16h4"></path></svg>
+          </span>
+          <div>
+            <span class="booking-policy-card-label">Policy reminder</span>
+            <h3>Bookings are final</h3>
+          </div>
+        </div>
+        <ul class="booking-policy-points">
+          <li><span aria-hidden="true">&check;</span>All bookings are non-refundable</li>
+          <li><span aria-hidden="true">&check;</span>No cancellations once confirmed</li>
+        </ul>
+      </article>
+
+      <article class="booking-policy-card booking-policy-card-weather">
+        <div class="booking-policy-card-heading">
+          <span class="booking-policy-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M7 16.5h10a4 4 0 0 0 .5-8A6 6 0 0 0 6.2 7 4.8 4.8 0 0 0 7 16.5Z"></path><path d="m9 19-1 2m5-2-1 2m5-2-1 2"></path></svg>
+          </span>
+          <div>
+            <span class="booking-policy-card-label">Weather policy</span>
+            <h3>Our courts are outdoors</h3>
+          </div>
+        </div>
+        <p class="booking-policy-weather-copy">If it rains during your scheduled time, you may choose either option:</p>
+        <div class="booking-policy-options">
+          <div><span>01</span><p>Continue playing even while it&rsquo;s raining, at your own discretion.</p></div>
+          <div><span>02</span><p>Use the remaining time as credit for a future booking.</p></div>
+        </div>
+      </article>
+    </div>
+
+    <footer class="booking-policy-footer">
+      <p><strong>Thank you for understanding.</strong><span>See you on the court!</span></p>
+      <button id="bookingPolicyAccept" class="booking-policy-accept" type="button" onclick="acknowledgeBookingPolicies()">
+        <span>I understand &mdash; continue</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+      </button>
+    </footer>
+  </section>
+</div>
+
 <!-- NAVBAR -->
 <!-- OPEN PLAY MAY 9 ANNOUNCEMENT -->
 <div id="opAnnounceSplash" style="display:none;position:fixed;inset:0;z-index:999;background:#091521;align-items:center;justify-content:center;padding:24px;flex-direction:column;text-align:center;overflow:hidden;">
@@ -3607,6 +3672,7 @@ function bookingFeeDisplay(totalFee, hrs) {
 
 function hostInviteHasBlockingModal() {
   return (
+    isBookingPolicyActive() ||
     $('bookModal')?.classList.contains('active') ||
     $('findTimeModal')?.classList.contains('active') ||
     $('opModal')?.classList.contains('active') ||
@@ -3621,6 +3687,11 @@ function isSplashActive() {
   return !!splash && splash.style.display !== 'none' && !splash.classList.contains('dismissed');
 }
 
+function isBookingPolicyActive() {
+  const policy = $('bookingPolicyScreen');
+  return !!policy && !policy.hidden && policy.getAttribute('aria-hidden') !== 'true';
+}
+
 function lockHostInviteScroll() {
   if (hostInviteScrollLocked) return;
   hostInvitePreviousOverflow = document.body.style.overflow || '';
@@ -3631,7 +3702,7 @@ function lockHostInviteScroll() {
 function unlockHostInviteScroll() {
   if (!hostInviteScrollLocked) return;
   if (!hostInviteHasBlockingModal()) {
-    document.body.style.overflow = isSplashActive()
+    document.body.style.overflow = (isSplashActive() || isBookingPolicyActive())
       ? 'hidden'
       : (hostInvitePreviousOverflow === 'hidden' ? '' : hostInvitePreviousOverflow);
   }
@@ -3664,7 +3735,7 @@ function maybeShowHostInvite() {
     hideHostInvite({ restoreScroll: true });
     return;
   }
-  if (isSplashActive()) {
+  if (isSplashActive() || isBookingPolicyActive()) {
     clearTimeout(hostInviteTimer);
     hostInviteTimer = setTimeout(maybeShowHostInvite, 800);
     return;
@@ -8104,22 +8175,90 @@ function dismissSplash(afterDismiss) {
   window.setTimeout(finish, 750);
 }
 
-function enterBooking(destination) {
-  dismissSplash(() => {
-    if (destination === 'find-time') {
-      openFindTimeModal();
-      return;
-    }
+let pendingPolicyDestination = 'courts';
 
-    document.getElementById('courts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    document.querySelector('#courts button, #courts [href], #courts [tabindex]')?.focus({ preventScroll: true });
+function showBookingPolicies(destination = 'courts') {
+  const policy = document.getElementById('bookingPolicyScreen');
+  if (!policy) {
+    continueToBooking(destination);
+    return;
+  }
+
+  pendingPolicyDestination = destination;
+  policy.hidden = false;
+  policy.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+  window.requestAnimationFrame(() => {
+    policy.classList.add('visible');
+    const focusAcceptButton = () => {
+      if (isBookingPolicyActive()) document.getElementById('bookingPolicyAccept')?.focus();
+    };
+    window.setTimeout(focusAcceptButton, 120);
+    window.setTimeout(() => {
+      if (!policy.contains(document.activeElement)) focusAcceptButton();
+    }, 500);
   });
+}
+
+function continueToBooking(destination) {
+  if (destination === 'find-time') {
+    openFindTimeModal();
+    return;
+  }
+
+  document.getElementById('courts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.querySelector('#courts button, #courts [href], #courts [tabindex]')?.focus({ preventScroll: true });
+}
+
+function acknowledgeBookingPolicies() {
+  const policy = document.getElementById('bookingPolicyScreen');
+  const acceptButton = document.getElementById('bookingPolicyAccept');
+  if (!policy || policy.hidden || acceptButton?.disabled) return;
+
+  if (acceptButton) acceptButton.disabled = true;
+  policy.classList.remove('visible');
+  policy.setAttribute('aria-hidden', 'true');
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    policy.hidden = true;
+    document.body.style.overflow = '';
+    if (acceptButton) acceptButton.disabled = false;
+    continueToBooking(pendingPolicyDestination);
+  };
+
+  policy.addEventListener('transitionend', finish, { once: true });
+  window.setTimeout(finish, 450);
+}
+
+function enterBooking(destination) {
+  dismissSplash(() => showBookingPolicies(destination));
 }
 // Lock scroll while splash is showing
 document.body.style.overflow = 'hidden';
 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && isSplashActive()) enterBooking('courts');
+  if (event.key === 'Escape' && isBookingPolicyActive()) event.preventDefault();
+  if (event.key === 'Tab' && isBookingPolicyActive()) {
+    const policy = document.getElementById('bookingPolicyScreen');
+    const focusable = [...document.querySelectorAll('#bookingPolicyScreen button:not([disabled]), #bookingPolicyScreen [tabindex="0"]')];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!policy?.contains(document.activeElement)) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
