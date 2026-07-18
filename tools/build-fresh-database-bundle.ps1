@@ -21,6 +21,7 @@ $sources = @(
   'supabase\migrations\20260717143000_receipt_verification_rate_limit.sql',
   'supabase\migrations\20260718090000_atomic_booking_cancellation.sql',
   'supabase\migrations\20260718094000_fix_guest_cancellation_guard.sql',
+  'supabase\migrations\20260718100000_discard_unfinished_guest_holds.sql',
   'supabase\migrations\20260717214500_restore_service_role_privileges.sql'
 )
 
