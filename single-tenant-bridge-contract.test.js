@@ -16,7 +16,7 @@ function read(relativePath) {
 }
 
 test('every application page loads runtime config, Supabase, the adapter, then the secure bridge', () => {
-  for (const page of ['index.html', 'admin.html', 'login.html', 'host.html']) {
+  for (const page of ['index.html', 'admin.html', 'login.html', 'host.html', 'player-live.html']) {
     const html = read(page);
     const runtimeAt = html.indexOf('src="/runtime-config.js"');
     const libraryAt = html.indexOf('src="supabase.min.js"');

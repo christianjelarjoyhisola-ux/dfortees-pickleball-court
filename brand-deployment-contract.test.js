@@ -7,7 +7,7 @@ const root = __dirname;
 const logoName = 'logonewnew.png';
 const oldLogoName = 'logodfortees.jpg';
 const logoPath = path.join(root, logoName);
-const htmlFiles = ['index.html', 'admin.html', 'login.html', 'host.html'];
+const htmlFiles = ['index.html', 'admin.html', 'login.html', 'host.html', 'player-live.html'];
 const manifestFiles = [
   'tools/build-pages.js',
   'tools/local-server.js',

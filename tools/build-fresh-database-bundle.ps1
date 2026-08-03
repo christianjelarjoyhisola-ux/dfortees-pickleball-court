@@ -22,7 +22,23 @@ $sources = @(
   'supabase\migrations\20260718090000_atomic_booking_cancellation.sql',
   'supabase\migrations\20260718094000_fix_guest_cancellation_guard.sql',
   'supabase\migrations\20260718100000_discard_unfinished_guest_holds.sql',
-  'supabase\migrations\20260717214500_restore_service_role_privileges.sql'
+  'supabase\migrations\20260717214500_restore_service_role_privileges.sql',
+  'supabase\migrations\20260724090000_play_manager_round_conflict_guard.sql',
+  'supabase\migrations\20260724150000_open_play_rotation_player_replace.sql',
+  'supabase\migrations\20260724190000_open_play_rotation_parity.sql',
+  'supabase\migrations\20260725100000_play_manager_player_replacement.sql',
+  'supabase\migrations\20260725110000_play_manager_live_sharing.sql',
+  'supabase\migrations\20260725120000_play_manager_live_share_lifecycle.sql',
+  'supabase\migrations\20260725130000_play_manager_session_mutation_guard.sql',
+  'supabase\migrations\20260725140000_play_manager_queue_wait_time.sql',
+  'supabase\migrations\20260725150000_play_manager_match_winner_correction.sql',
+  'supabase\migrations\20260725160000_play_manager_winner_reveal.sql',
+  'supabase\migrations\20260725170000_play_manager_ready_courts.sql',
+  'supabase\migrations\20260725180000_play_manager_player_skill_levels.sql',
+  'supabase\migrations\20260728130000_open_play_performance_rating.sql',
+  'supabase\migrations\20260729130000_open_play_competitive_head_to_head.sql',
+  'supabase\migrations\20260729150000_open_play_production_ranking_modes.sql',
+  'supabase\migrations\20260729170000_dfortees_two_game_ranking_qualification.sql'
 )
 
 $missing = $sources | Where-Object { -not (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Leaf) }

@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 try {
-  $checkFiles = @('booking-balance.js', 'brand-config.js', 'supabase-config.js', 'single-tenant-api.js', '_worker.js', 'tools/local-server.js', 'single-tenant-schema-contract.test.js', 'single-tenant-bridge-contract.test.js', 'payment-window-contract.test.js', 'brand-deployment-contract.test.js', 'settings-preservation-contract.test.js')
+  $checkFiles = @('booking-balance.js', 'brand-config.js', 'supabase-config.js', 'single-tenant-api.js', 'open-play-rotation.js', 'open-play-rating.js', 'play-manager-db.js', 'play-manager.js', 'player-live.js', '_worker.js', 'tools/local-server.js', 'single-tenant-schema-contract.test.js', 'single-tenant-bridge-contract.test.js', 'payment-window-contract.test.js', 'brand-deployment-contract.test.js', 'settings-preservation-contract.test.js', 'play-manager-contract.test.js')
   foreach ($file in $checkFiles) {
     & node --check $file
     if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $file" }
@@ -33,11 +33,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'D''fortees Edge Function type checking failed.' }
   }
 
-  $runtimeTargets = @('index.html', 'admin.html', 'login.html', 'host.html', 'brand-config.js', 'brand.css', 'supabase-config.js', 'single-tenant-api.js', '_worker.js', 'supabase/migrations/20260717130000_single_tenant_security.sql')
+  $runtimeTargets = @('index.html', 'admin.html', 'login.html', 'host.html', 'player-live.html', 'brand-config.js', 'brand.css', 'supabase-config.js', 'single-tenant-api.js', 'open-play-rotation.js', 'open-play-rating.js', 'play-manager-db.js', 'play-manager.js', 'play-manager.css', 'player-live.js', 'player-live.css', '_worker.js', 'supabase/migrations/20260717130000_single_tenant_security.sql')
   $legacyMatches = & rg -i -l 'korte|kortedos|korte-dos' @runtimeTargets 2>$null
   if ($legacyMatches) { throw "Legacy brand identifiers remain in runtime code: $($legacyMatches -join ', ')" }
 
-  $configTargets = @('supabase-config.js', 'single-tenant-api.js', '_worker.js', 'deploy-edge-functions.ps1', 'deploy-cloudflare-pages.ps1', 'supabase/migrations/20260717130000_single_tenant_security.sql')
+  $configTargets = @('supabase-config.js', 'single-tenant-api.js', 'play-manager-db.js', '_worker.js', 'deploy-edge-functions.ps1', 'deploy-cloudflare-pages.ps1', 'supabase/migrations/20260717130000_single_tenant_security.sql')
   $expectedPublicSupabaseUrl = 'https://ebykgvvjsuawawdheyil.supabase.co'
   foreach ($configTarget in $configTargets) {
     $configText = [System.IO.File]::ReadAllText((Join-Path $repoRoot $configTarget), [System.Text.Encoding]::UTF8)

@@ -7,6 +7,8 @@
 <link rel="icon" type="image/png" href="logonewnew.png" />
 <script src="chart.min.js"></script>
 <script src="booking-balance.js?v=20260716-host-balance-v1"></script>
+<script src="open-play-rotation.js?v=20260803-dfortees-play-manager-v1"></script>
+<link rel="stylesheet" href="play-manager.css?v=20260803-dfortees-play-manager-v1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="brand.css?v=20260716-4"/>
@@ -2082,7 +2084,7 @@ tr:hover td { background: var(--bg2); }
       <div class="nav-item" data-s="courts" data-perm="courts" onclick="goto('courts')"><span>&#127967;</span> Courts</div>
       <div class="nav-item" data-s="blocked" data-perm="open_play" onclick="goto('blocked')"><span>&#127934;</span> Open Play</div>
       <div class="nav-item" data-s="hosts" data-perm="host_open_play" onclick="goto('hosts')"><span>&#128101;</span> Host Center</div>
-      <div class="nav-item" data-s="gamemgr" data-perm="open_play" onclick="goto('gamemgr')"><span>&#127955;</span> Game Manager</div>
+      <div class="nav-item" data-s="gamemgr" data-perm="open_play" onclick="goto('gamemgr')"><span>&#127955;</span> Play Manager</div>
       <div class="nav-item" data-s="maintenance" data-perm="maintenance" onclick="goto('maintenance')"><span>&#128295;</span> Maintenance</div>
       <div class="nav-item" data-s="payments" data-perm="payments" onclick="goto('payments')"><span>&#128179;</span> Payments</div>
     </div>
@@ -2720,7 +2722,7 @@ tr:hover td { background: var(--bg2); }
               <option value="">All Courts</option>
             </select>
             <input type="date" class="fi" id="opRegDate" style="max-width:160px" onchange="renderOpRegistrations()"/>
-            <button class="btn btn-p btn-sm" onclick="gmOpenFromReservations()">Game Manager</button>
+            <button class="btn btn-p btn-sm" onclick="pmOpenFromReservations()">Play Manager</button>
             <button class="btn btn-g btn-sm" onclick="gmCopyReservationManagerLink()">Copy Link</button>
             <button class="btn btn-sm" style="border:1px solid var(--border);color:var(--muted);background:transparent;font-size:.78rem" onclick="$('opRegDate').value='';$('opRegCourt').value='';renderOpRegistrations()">Clear</button>
           </div>
@@ -2822,6 +2824,7 @@ tr:hover td { background: var(--bg2); }
 
     <!-- GAME MANAGER -->
     <div id="sec-gamemgr" class="adm-sec">
+      <div id="playManagerRoot"></div>
       <div class="toolbar">
         <h2>OPEN PLAY GAME MANAGER</h2>
         <div class="gm-actions">
@@ -4458,9 +4461,9 @@ let sess;
 /* ==============================================
    NAVIGATION
    ============================================== */
-const titles={dash:'Dashboard',bookings:'Bookings',deleted:'Deleted Bookings',payreview:'Payment Review',reports:'Reports',courts:'Courts',accounts:'Accounts',remittances:'Remittances',blocked:'Open Play',hosts:'Host Center',gamemgr:'Game Manager',maintenance:'Maintenance',payments:'Payments'};
+const titles={dash:'Dashboard',bookings:'Bookings',deleted:'Deleted Bookings',payreview:'Payment Review',reports:'Reports',courts:'Courts',accounts:'Accounts',remittances:'Remittances',blocked:'Open Play',hosts:'Host Center',gamemgr:'Play Manager',maintenance:'Maintenance',payments:'Payments'};
 const SECTION_PERM={dash:'dashboard',bookings:'bookings',deleted:'owner_only',payreview:'payment_review',reports:'reports',courts:'courts',accounts:'host_accounts_view',remittances:'remittances',blocked:'open_play',hosts:'host_open_play',gamemgr:'open_play',maintenance:'maintenance',payments:'payments'};
-const SECTION_LOADERS={dash:renderDash,bookings:renderBookings,deleted:renderDeletedBookings,payreview:renderPaymentReview,reports:renderReport,courts:renderCourts,accounts:renderAccounts,remittances:renderRemittances,blocked:renderBlocked,hosts:renderHostCenter,gamemgr:renderGameManager,maintenance:renderMaintenance,payments:renderPaymentSettings};
+const SECTION_LOADERS={dash:renderDash,bookings:renderBookings,deleted:renderDeletedBookings,payreview:renderPaymentReview,reports:renderReport,courts:renderCourts,accounts:renderAccounts,remittances:renderRemittances,blocked:renderBlocked,hosts:renderHostCenter,gamemgr:()=>window.PlayManager?.render(),maintenance:renderMaintenance,payments:renderPaymentSettings};
 let _curSection=null;
 async function goto(s){
   // Block navigation to sections the current role can't access
@@ -11051,5 +11054,9 @@ async function checkAgreementGate(session) {
 <script src="supabase.min.js"></script>
 <script src="supabase-config.js?v=20260717-single-tenant-v1"></script>
 <script src="single-tenant-api.js?v=20260717-single-tenant-v1"></script>
+<script src="open-play-rating.js?v=20260803-dfortees-play-manager-v1"></script>
+<script src="play-manager-db.js?v=20260803-dfortees-play-manager-v1"></script>
+<script src="qrcode.min.js?v=1.5.4"></script>
+<script src="play-manager.js?v=20260803-dfortees-play-manager-v1"></script>
 </body>
 </html>
