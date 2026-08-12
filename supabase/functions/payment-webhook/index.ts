@@ -234,13 +234,16 @@ Deno.serve(async (req) => {
     if (sessionBookings.length > 0) {
       const bookingUpdate: Record<string, unknown> = {
         payment_status: bookingPaymentStatus,
+        // Providers report payment facts; only a court owner decides whether
+        // the booking itself is confirmed or cancelled.
+        status: "pending",
       };
       if (normalized === "paid") bookingUpdate.paid_at = paidAtIso;
-      if (normalized === "failed") bookingUpdate.status = "cancelled";
       const { error: bookingUpdateErr } = await db
         .from("bookings")
         .update(bookingUpdate)
-        .eq("payment_session_id", storedSession.id);
+        .eq("payment_session_id", storedSession.id)
+        .in("status", ["verifying", "pending"]);
       if (bookingUpdateErr) throw bookingUpdateErr;
     }
 

@@ -112,7 +112,7 @@ test('the deployed receipt entrypoint is lightweight and never fabricates prior 
 
 test('receipt audit must persist before a booking can be finalized', () => {
   const auditInsert = verifier.indexOf('const { error: auditErr } = await db.from("receipt_verifications").insert(');
-  const finalStatus = verifier.indexOf('const statusUpdate: Record<string, unknown> = {}');
+  const finalStatus = verifier.indexOf('const statusUpdate: Record<string, unknown>');
   assert.ok(auditInsert >= 0, 'audit insertion must exist');
   assert.ok(finalStatus > auditInsert, 'audit insertion must happen before final booking status');
   assert.match(
@@ -127,13 +127,17 @@ test('receipt audit must persist before a booking can be finalized', () => {
   assert.match(verifier, /receipt_verified_at: receiptVerifiedAt/);
 });
 
-test('exact receipt replays are rejected outside the current booking group', () => {
+test('exact receipt replays are flagged for owner review outside the current booking group', () => {
   assert.match(
     verifier,
     /\.eq\("receipt_image_hash", imageHash\)[\s\S]*?!bookingGroupRefs\.has/,
   );
   assert.match(verifier, /if \(duplicateImage\) flags\.push\("DUPLICATE_IMAGE"\)/);
-  assert.match(verifier, /"DUPLICATE_IMAGE",/);
+  const decisionStart = verifier.indexOf('// ── decision routing');
+  const decisionEnd = verifier.indexOf('const extracted =', decisionStart);
+  const decision = verifier.slice(decisionStart, decisionEnd);
+  assert.match(decision, /result = flags\.length === 0 \? "auto_approved" : "manual_review";/);
+  assert.doesNotMatch(decision, /result = "rejected";/);
 });
 
 test('pricing calculation failures route to review, not payment-fraud rejection', () => {
