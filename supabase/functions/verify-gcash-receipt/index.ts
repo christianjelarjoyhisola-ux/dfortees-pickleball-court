@@ -6,18 +6,13 @@
 //   multipart { action: "verify", bookingRef, provider, receipt, contentType }
 //   JSON { action: "verify", bookingRef, provider, imageBase64, contentType }
 //     -> OCR (Google Vision) + fraud checks + confidence routing.
-//        Stores the image (private bucket), writes an audit row, advances
-//        payment_status on auto-approve, and alerts admin on review/reject.
+//        Stores the image (private bucket), writes an audit row, and alerts the
+//        court owner that every submitted receipt needs manual review.
 //   { action: "sign", bookingRef }    (admin-only, requires a user JWT)
 //     -> returns a short-lived signed URL to view the stored receipt image.
 //
-// Decision lanes:
-//   auto_approved : zero hard flags, zero soft flags, OCR confident
-//   manual_review : soft flag(s) or unreadable fields or low confidence
-//   rejected      : any hard flag (duplicate / wrong number / underpay / stale)
-//
-// Rejections auto-cancel the booking and release its slot. Uncertain OCR fields
-// must therefore route to manual review instead of becoming hard flags.
+// OCR and fraud checks are advisory evidence only. They never approve, reject,
+// or cancel a booking; the court owner is the sole booking decision-maker.
 // ----------------------------------------------------------------------------
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -45,25 +40,6 @@ const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 const RECEIPT_ATTEMPT_LIMIT = 5;
 const RECEIPT_ATTEMPT_WINDOW_SECONDS = 10 * 60;
 const PESO_TOLERANCE = 5; // allow ±₱5 rounding; underpay beyond this is a hard flag
-
-// Hard flags force a rejection; soft flags force manual review.
-const HARD_FLAGS = new Set([
-  "REF_FORMAT_INVALID",
-  "SUSPECTED_FAKE", // OCR ran and image has zero receipt-like content
-  "IMAGE_UNREADABLE", // OCR found NO text at all -> random/blank/non-receipt image
-  "DUPLICATE_REF",
-  "DUPLICATE_IMAGE",
-  "DUPLICATE_INVOICE",
-  "DUPLICATE_INSTAPAY_REF",
-  "DUPLICATE_BPI_TRANSACTION_REF",
-  "METHOD_MISMATCH",
-  "REF_MISMATCH",
-  "DATE_NOT_TODAY",
-  "TIME_EXPIRED",
-  "TIME_FUTURE",
-  "WRONG_GCASH_NUMBER",
-  "AMOUNT_MISMATCH", // Only hard if significantly underpaid (>₱5)
-]);
 
 type PaymentProvider = "gcash" | "bdopay" | "maya" | "bpi" | "gotyme" | "pnb";
 type OcrProvider = "google_vision" | "none";
@@ -1391,16 +1367,13 @@ Deno.serve(async (req) => {
     const expectedName = expectedMerchant.name;
     let pricingError = "";
     let expectedAmount = 0;
-    let expectedTotal = 0;
     let bookingGroup: Array<Record<string, unknown>> = [booking];
     try {
       if (inlinePricingKind === "host_session") {
         const amounts = await expectedHostSessionAmounts(db, booking);
-        expectedTotal = amounts.total;
         expectedAmount = amounts.due;
       } else if (inlinePricingKind === "open_play") {
         const amounts = expectedOpenPlayAmounts(booking, settings);
-        expectedTotal = amounts.total;
         expectedAmount = amounts.due;
       } else {
         bookingGroup = await loadBookingGroup(db, booking);
@@ -1409,7 +1382,6 @@ Deno.serve(async (req) => {
           bookingGroup,
           settings,
         );
-        expectedTotal = amounts.total;
         expectedAmount = amounts.due;
       }
     } catch (err) {
@@ -1718,7 +1690,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    const alreadyClaimedByThisBooking = new Set<string>();
     for (const item of dedupeKeys) {
       const { data: existingRef } = await db
         .from("used_gcash_refs")
@@ -1730,55 +1701,16 @@ Deno.serve(async (req) => {
         !bookingGroupRefs.has(String(existingRef.booking_ref || ""))
       ) {
         flags.push(item.duplicateFlag);
-      } else if (
-        existingRef &&
-        bookingGroupRefs.has(String(existingRef.booking_ref || ""))
-      ) {
-        alreadyClaimedByThisBooking.add(item.key);
       }
     }
 
     // ── decision routing ────────────────────────────────────────────────────
-    const hasHard = flags.some((f) => HARD_FLAGS.has(f));
-    const hasSoftOrUnreadable = flags.length > 0;
+    // Receipt analysis is advisory only. The court owner is the sole authority
+    // that can confirm or reject a submitted booking.
     let result: "auto_approved" | "manual_review" | "rejected";
-    if (hasHard) result = "rejected";
-    else if (hasSoftOrUnreadable) result = "manual_review";
-    else result = "auto_approved";
+    result = "manual_review";
 
-    // Race-safe claim of payment ledger keys. The table's primary key on
-    // gcash_ref is the source of truth if another request claims the same key.
-    if (result === "auto_approved") {
-      for (const item of dedupeKeys) {
-        if (alreadyClaimedByThisBooking.has(item.key)) continue;
-        const { error: claimErr } = await db
-          .from("used_gcash_refs")
-          .insert({
-            gcash_ref: item.key,
-            booking_ref: bookingRef,
-            provider: item.providerKey,
-          });
-        if (claimErr) {
-          console.error("payment ledger claim failed:", errMsg(claimErr));
-          // A concurrent retry for the same booking can lose the primary-key
-          // insert race. Re-read ownership before treating it as payment reuse.
-          const { data: claimedRef } = await db
-            .from("used_gcash_refs")
-            .select("booking_ref")
-            .eq("gcash_ref", item.key)
-            .maybeSingle();
-          if (claimedRef && bookingGroupRefs.has(String(claimedRef.booking_ref || ""))) {
-            alreadyClaimedByThisBooking.add(item.key);
-            continue;
-          }
-          if (!flags.includes(item.duplicateFlag)) flags.push(item.duplicateFlag);
-          result = "rejected";
-          break;
-        }
-      }
-    }
-
-    let confidence = result === "auto_approved" ? Math.max(0.9, ocrConfidence) : result === "manual_review" ? 0.5 : 0.1;
+    let confidence = 0.5;
 
     const extracted = {
       ref: extractedRef,
@@ -1848,22 +1780,11 @@ Deno.serve(async (req) => {
     }
 
     // ── persist outcome on the booking ──────────────────────────────────────
-    const statusUpdate: Record<string, unknown> = {};
-    if (result === "auto_approved") {
-      const fullyPaid = expectedAmount >= expectedTotal - PESO_TOLERANCE;
-      statusUpdate.payment_status = fullyPaid ? "paid" : "downpayment_paid";
-      if (booking.status !== "completed" && booking.status !== "cancelled") {
-        statusUpdate.status = "confirmed";
-      }
-    } else if (result === "manual_review") {
-      statusUpdate.payment_status = "for_verification";
-      if (booking.status !== "completed" && booking.status !== "cancelled") {
-        statusUpdate.status = "pending";
-      }
-    } else if (result === "rejected") {
-      // Cancel the booking immediately — invalid/fake receipt → slot must be freed.
-      statusUpdate.status = "cancelled";
-      statusUpdate.payment_status = "rejected";
+    const statusUpdate: Record<string, unknown> = {
+      payment_status: "for_verification",
+    };
+    if (booking.status !== "completed" && booking.status !== "cancelled") {
+      statusUpdate.status = "pending";
     }
 
     const metadataUpdate: Record<string, unknown> = {
@@ -1942,24 +1863,6 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Last-resort fallback: if a rejected receipt's atomic update failed, try
-      // more with just the cancel field. The slot MUST be freed on a rejected
-      // receipt — no exceptions.
-      if (finalUpdateError && result === "rejected") {
-        const { data: fallbackRows, error: fallbackErr } = await bookingUpdateQuery(db, booking, {
-          status: "cancelled",
-          payment_status: "rejected",
-        }).in("status", ["verifying", "pending"]).select("ref");
-        if (fallbackErr || !fallbackRows || fallbackRows.length === 0) {
-          console.error("FALLBACK cancel also failed:", errMsg(fallbackErr));
-        } else {
-          console.error(
-            "FALLBACK cancel succeeded after status update failure",
-          );
-          finalUpdateError = null;
-        }
-      }
-
       if (finalUpdateError) {
         // Never tell the browser that payment was confirmed when the final
         // booking/payment write did not persist. The receipt was already
@@ -1995,11 +1898,9 @@ Deno.serve(async (req) => {
 
     // ── audit trail (immutable) ─────────────────────────────────────────────
     // ── alert admin on anything needing a human ─────────────────────────────
-    if (result !== "auto_approved") {
-      const icon = result === "rejected" ? "❌" : "⚠️";
-      const head = result === "rejected" ? "RECEIPT REJECTED — BOOKING CANCELLED" : "RECEIPT NEEDS REVIEW";
+    if (result === "manual_review") {
       await sendTelegram(
-        `${icon} <b>${head}</b>\n` +
+        `⚠️ <b>RECEIPT NEEDS REVIEW</b>\n` +
           `━━━━━━━━━━━━━━━━━━\n` +
           `📋 Ref: <code>${bookingRef}</code>\n` +
           `👤 ${booking.full_name || "—"}\n` +
@@ -2007,7 +1908,7 @@ Deno.serve(async (req) => {
           (extractedAmount != null ? ` · Seen: ₱${extractedAmount.toFixed(2)}` : "") +
           `\n` +
           `🚩 Flags: <code>${flags.join(", ") || "none"}</code>\n` +
-          (result === "rejected" ? `🗑 Booking auto-cancelled. Slot is now free.` : `👉 Open admin panel to review the receipt.`),
+          `👉 Open admin panel to review and confirm the booking.`,
       );
     }
 
@@ -2023,7 +1924,7 @@ Deno.serve(async (req) => {
       receiptPhash: phash,
       receiptVerifiedAt: metadataUpdate.receipt_verified_at,
       ...(finalUpdateError ? { manualReviewRequired: true } : {}),
-      message: result === "auto_approved" ? "Payment verified." : result === "manual_review" ? "Received — the owner will verify your payment shortly." : "Your receipt could not be verified. Your booking has been cancelled — please try again with a valid receipt.",
+      message: "Received — the owner will verify your payment and confirm the booking shortly.",
     });
   } catch (err) {
     console.error("verify-gcash-receipt error:", errMsg(err));
