@@ -6,13 +6,13 @@
 //   multipart { action: "verify", bookingRef, provider, receipt, contentType }
 //   JSON { action: "verify", bookingRef, provider, imageBase64, contentType }
 //     -> OCR (Google Vision) + fraud checks + confidence routing.
-//        Stores the image (private bucket), writes an audit row, and alerts the
-//        court owner that every submitted receipt needs manual review.
+//        Stores the image (private bucket), writes an audit row, auto-approves
+//        clean receipts, and alerts the court owner when review is needed.
 //   { action: "sign", bookingRef }    (admin-only, requires a user JWT)
 //     -> returns a short-lived signed URL to view the stored receipt image.
 //
-// OCR and fraud checks are advisory evidence only. They never approve, reject,
-// or cancel a booking; the court owner is the sole booking decision-maker.
+// Clean receipts may be approved automatically. Any flagged or uncertain
+// receipt stays pending for the court owner; verification never auto-cancels.
 // ----------------------------------------------------------------------------
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -1367,13 +1367,16 @@ Deno.serve(async (req) => {
     const expectedName = expectedMerchant.name;
     let pricingError = "";
     let expectedAmount = 0;
+    let expectedTotal = 0;
     let bookingGroup: Array<Record<string, unknown>> = [booking];
     try {
       if (inlinePricingKind === "host_session") {
         const amounts = await expectedHostSessionAmounts(db, booking);
+        expectedTotal = amounts.total;
         expectedAmount = amounts.due;
       } else if (inlinePricingKind === "open_play") {
         const amounts = expectedOpenPlayAmounts(booking, settings);
+        expectedTotal = amounts.total;
         expectedAmount = amounts.due;
       } else {
         bookingGroup = await loadBookingGroup(db, booking);
@@ -1382,6 +1385,7 @@ Deno.serve(async (req) => {
           bookingGroup,
           settings,
         );
+        expectedTotal = amounts.total;
         expectedAmount = amounts.due;
       }
     } catch (err) {
@@ -1690,6 +1694,7 @@ Deno.serve(async (req) => {
       });
     }
 
+    const alreadyClaimedByThisBooking = new Set<string>();
     for (const item of dedupeKeys) {
       const { data: existingRef } = await db
         .from("used_gcash_refs")
@@ -1701,16 +1706,48 @@ Deno.serve(async (req) => {
         !bookingGroupRefs.has(String(existingRef.booking_ref || ""))
       ) {
         flags.push(item.duplicateFlag);
+      } else if (
+        existingRef &&
+        bookingGroupRefs.has(String(existingRef.booking_ref || ""))
+      ) {
+        alreadyClaimedByThisBooking.add(item.key);
       }
     }
 
     // ── decision routing ────────────────────────────────────────────────────
-    // Receipt analysis is advisory only. The court owner is the sole authority
-    // that can confirm or reject a submitted booking.
     let result: "auto_approved" | "manual_review" | "rejected";
-    result = "manual_review";
+    result = flags.length === 0 ? "auto_approved" : "manual_review";
 
-    let confidence = 0.5;
+    // Claim payment ledger keys only for a clean automatic approval. If a
+    // concurrent booking owns a key, keep this booking pending for owner review.
+    if (result === "auto_approved") {
+      for (const item of dedupeKeys) {
+        if (alreadyClaimedByThisBooking.has(item.key)) continue;
+        const { error: claimErr } = await db
+          .from("used_gcash_refs")
+          .insert({
+            gcash_ref: item.key,
+            booking_ref: bookingRef,
+            provider: item.providerKey,
+          });
+        if (claimErr) {
+          console.error("payment ledger claim failed:", errMsg(claimErr));
+          const { data: claimedRef } = await db
+            .from("used_gcash_refs")
+            .select("booking_ref")
+            .eq("gcash_ref", item.key)
+            .maybeSingle();
+          if (claimedRef && bookingGroupRefs.has(String(claimedRef.booking_ref || ""))) {
+            continue;
+          }
+          if (!flags.includes(item.duplicateFlag)) flags.push(item.duplicateFlag);
+          result = "manual_review";
+          break;
+        }
+      }
+    }
+
+    let confidence = result === "auto_approved" ? Math.max(0.9, ocrConfidence) : 0.5;
 
     const extracted = {
       ref: extractedRef,
@@ -1780,11 +1817,18 @@ Deno.serve(async (req) => {
     }
 
     // ── persist outcome on the booking ──────────────────────────────────────
-    const statusUpdate: Record<string, unknown> = {
-      payment_status: "for_verification",
-    };
-    if (booking.status !== "completed" && booking.status !== "cancelled") {
-      statusUpdate.status = "pending";
+    const statusUpdate: Record<string, unknown> = {};
+    if (result === "auto_approved") {
+      const fullyPaid = expectedAmount >= expectedTotal - PESO_TOLERANCE;
+      statusUpdate.payment_status = fullyPaid ? "paid" : "downpayment_paid";
+      if (booking.status !== "completed" && booking.status !== "cancelled") {
+        statusUpdate.status = "confirmed";
+      }
+    } else {
+      statusUpdate.payment_status = "for_verification";
+      if (booking.status !== "completed" && booking.status !== "cancelled") {
+        statusUpdate.status = "pending";
+      }
     }
 
     const metadataUpdate: Record<string, unknown> = {
@@ -1924,7 +1968,9 @@ Deno.serve(async (req) => {
       receiptPhash: phash,
       receiptVerifiedAt: metadataUpdate.receipt_verified_at,
       ...(finalUpdateError ? { manualReviewRequired: true } : {}),
-      message: "Received — the owner will verify your payment and confirm the booking shortly.",
+      message: result === "auto_approved"
+        ? "Payment verified. Your booking is confirmed."
+        : "Received — the owner will verify your payment and confirm the booking shortly.",
     });
   } catch (err) {
     console.error("verify-gcash-receipt error:", errMsg(err));

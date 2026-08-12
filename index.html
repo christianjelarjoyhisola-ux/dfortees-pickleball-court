@@ -3961,9 +3961,9 @@ async function verifyHostSessionReceipt(ref, method, inlineData) {
     contentType: _hostSessionReceiptFile.type || 'image/jpeg',
     bookingData: inlineData,
   });
-  // Treat OCR as advisory even if an older deployed function returns a legacy
-  // auto_approved/rejected value.
-  const status = 'manual_review';
+  // Preserve clean automatic approvals. Any non-approved legacy result is
+  // safely downgraded to pending owner review instead of cancellation.
+  const status = res?.status === 'auto_approved' ? 'auto_approved' : 'manual_review';
   const msg = res?.publicReason || res?.message || 'Receipt received.';
   if (st) {
     if (status === 'auto_approved') { st.style.background = 'rgba(var(--ac),.12)'; st.style.color = 'var(--accent)'; st.textContent = 'Payment verified. Your spot is confirmed.'; }
@@ -4024,7 +4024,7 @@ async function submitHostSessionJoin() {
         full_name: name,
         created_at: _hostSessionStartedAt || new Date().toISOString(),
       });
-      paymentStatus = 'pending';
+      paymentStatus = receiptResult.status === 'auto_approved' ? 'paid' : 'pending';
     }
     await DB.addOpenPlayHostSessionRegistration({
       sessionId: session.id,
@@ -7242,13 +7242,20 @@ async function submitBookingLegacy(e) {
         if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '🎾 Confirm Booking'; }
         return;
       }
-      // OCR supplies evidence to the owner, never a booking decision. Every
-      // submitted receipt stays pending until the court owner confirms it.
-      booking.status = 'pending';
-      booking.paymentStatus = 'for_verification';
-      await DB.updateBooking(booking.ref, { status: 'pending', paymentStatus: 'for_verification' }).catch(() => {});
-      DB.notifyBookingUpdate(booking, 'payment_review_needed', receiptReasonFromFlags(booking._receiptResult?.flags || []) || 'Receipt needs owner review.').catch(() => {});
-      onCardDate(booking.courtId, booking.date).catch(() => {});
+      if (booking._receiptResult?.status === 'auto_approved') {
+        booking.status = 'confirmed';
+        booking.paymentStatus = (booking.downpayment >= booking.total - 1) ? 'paid' : 'downpayment_paid';
+        DB.notifyBookingUpdate(booking, 'payment_verified', 'Receipt auto-verified.').catch(() => {});
+        sendCustomerConfirmationEmail(booking);
+      } else {
+        // Flagged, rejected, or uncertain OCR results remain pending for the
+        // court owner. Receipt verification never auto-cancels a booking.
+        booking.status = 'pending';
+        booking.paymentStatus = 'for_verification';
+        await DB.updateBooking(booking.ref, { status: 'pending', paymentStatus: 'for_verification' }).catch(() => {});
+        DB.notifyBookingUpdate(booking, 'payment_review_needed', receiptReasonFromFlags(booking._receiptResult?.flags || []) || 'Receipt needs owner review.').catch(() => {});
+        onCardDate(booking.courtId, booking.date).catch(() => {});
+      }
     }
 
     if (gcashNeedsCheckout) {
@@ -7482,14 +7489,25 @@ async function submitBooking(e) {
         await refreshBookingItemViews(itemBookings);
         return;
       }
-      booking.status = 'pending';
-      booking.paymentStatus = 'for_verification';
-      itemBookings.forEach(row => { row.status = 'pending'; row.paymentStatus = 'for_verification'; });
-      await Promise.allSettled(itemBookings.map(row =>
-        DB.updateBooking(row.ref, { status: 'pending', paymentStatus: 'for_verification' })
-      ));
-      DB.notifyBookingUpdate(booking, 'payment_review_needed', receiptReasonFromFlags(booking._receiptResult?.flags || []) || 'Receipt needs owner review.').catch(() => {});
-      await refreshBookingItemViews(itemBookings);
+      if (booking._receiptResult?.status === 'auto_approved') {
+        booking.status = 'confirmed';
+        booking.paymentStatus = (booking.downpayment >= booking.total - 1) ? 'paid' : 'downpayment_paid';
+        itemBookings.forEach(row => {
+          row.status = 'confirmed';
+          row.paymentStatus = (row.downpayment >= row.total - 1) ? 'paid' : 'downpayment_paid';
+        });
+        DB.notifyBookingUpdate(booking, 'payment_verified', 'Receipt auto-verified.').catch(() => {});
+        sendCustomerConfirmationEmail(booking);
+      } else {
+        booking.status = 'pending';
+        booking.paymentStatus = 'for_verification';
+        itemBookings.forEach(row => { row.status = 'pending'; row.paymentStatus = 'for_verification'; });
+        await Promise.allSettled(itemBookings.map(row =>
+          DB.updateBooking(row.ref, { status: 'pending', paymentStatus: 'for_verification' })
+        ));
+        DB.notifyBookingUpdate(booking, 'payment_review_needed', receiptReasonFromFlags(booking._receiptResult?.flags || []) || 'Receipt needs owner review.').catch(() => {});
+        await refreshBookingItemViews(itemBookings);
+      }
     }
 
     showInvoice(booking);
@@ -7548,9 +7566,9 @@ async function verifyUploadedReceipt(bookingRef, method, inlineData = null) {
     };
     if (inlineData) payload.bookingData = inlineData;
     const res = await DB.verifyGcashReceipt(payload);
-    // Defense in depth for older edge deployments: the customer flow never
-    // turns an OCR result into confirmation or cancellation.
-    const status = 'manual_review';
+    // Keep automatic approval, but turn every non-approved outcome into
+    // pending owner review rather than cancellation.
+    const status = res?.status === 'auto_approved' ? 'auto_approved' : 'manual_review';
     const msg = res?.publicReason || res?.message || 'Receipt received.';
     if (st) {
       if (status === 'auto_approved') { st.style.background = 'rgba(var(--ac),.12)'; st.style.color = 'var(--accent)'; st.textContent = '✅ ' + msg; }
@@ -8728,7 +8746,7 @@ async function verifyOpReceipt(ref, method, inlineData) {
       contentType: _opReceiptFile.type || 'image/jpeg',
       bookingData: inlineData,
     });
-    const status = 'manual_review';
+    const status = res?.status === 'auto_approved' ? 'auto_approved' : 'manual_review';
     const msg = res?.publicReason || res?.message || 'Receipt received.';
     if (st) {
       if (status === 'auto_approved') { st.style.background = 'rgba(var(--ac),.12)'; st.style.color = 'var(--accent)'; st.textContent = '✅ ' + msg; }
@@ -8845,7 +8863,7 @@ async function submitOpenPlay() {
         full_name: name,
         created_at: _opSignupData.startedAt,
       });
-      regPayStatus = 'pending';
+      regPayStatus = receiptResult.status === 'auto_approved' ? 'paid' : 'pending';
     }
     const timeLabel = _opSignupData.sessionLabel || `${fmtT(_opSignupData.hour)} – ${fmtT(_opSignupData.hour + 1)}`;
     await DB.addOpenPlayRegistration({

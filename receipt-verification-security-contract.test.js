@@ -136,7 +136,7 @@ test('exact receipt replays are flagged for owner review outside the current boo
   const decisionStart = verifier.indexOf('// ── decision routing');
   const decisionEnd = verifier.indexOf('const extracted =', decisionStart);
   const decision = verifier.slice(decisionStart, decisionEnd);
-  assert.match(decision, /result = "manual_review";/);
+  assert.match(decision, /result = flags\.length === 0 \? "auto_approved" : "manual_review";/);
   assert.doesNotMatch(decision, /result = "rejected";/);
 });
 

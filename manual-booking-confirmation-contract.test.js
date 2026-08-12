@@ -15,33 +15,33 @@ const paymentWebhook = fs.readFileSync(
   'utf8',
 );
 
-test('receipt analysis always routes new submissions to owner review', () => {
+test('receipt analysis auto-approves clean receipts and routes every flagged receipt to owner review', () => {
   const decisionStart = verifier.indexOf('// ── decision routing');
   const decisionEnd = verifier.indexOf('const extracted =', decisionStart);
   const decision = verifier.slice(decisionStart, decisionEnd);
   assert.ok(decisionStart >= 0 && decisionEnd > decisionStart);
-  assert.match(decision, /result = "manual_review";/);
-  assert.doesNotMatch(decision, /result = "(?:auto_approved|rejected)";/);
+  assert.match(decision, /result = flags\.length === 0 \? "auto_approved" : "manual_review";/);
+  assert.doesNotMatch(decision, /result = "rejected";/);
 
   const persistStart = verifier.indexOf('const statusUpdate: Record<string, unknown>');
   const persistEnd = verifier.indexOf('const metadataUpdate:', persistStart);
   const persistence = verifier.slice(persistStart, persistEnd);
-  assert.match(persistence, /payment_status: "for_verification"/);
+  assert.match(persistence, /statusUpdate\.status = "confirmed"/);
   assert.match(persistence, /statusUpdate\.status = "pending"/);
-  assert.doesNotMatch(persistence, /statusUpdate\.status = "(?:confirmed|cancelled)"/);
+  assert.doesNotMatch(persistence, /statusUpdate\.status = "cancelled"/);
 });
 
-test('customer receipt flows defensively stay pending', () => {
+test('customer receipt flows preserve auto-approval and downgrade every other outcome to pending', () => {
   assert.equal(
-    (index.match(/const status = 'manual_review';/g) || []).length,
+    (index.match(/const status = res\?\.status === 'auto_approved' \? 'auto_approved' : 'manual_review';/g) || []).length,
     3,
-    'court booking, host session, and open-play receipt helpers must all ignore legacy automatic decisions',
+    'court booking, host session, and open-play receipt helpers must preserve approval without exposing rejection',
   );
-  assert.match(index, /Every[\s\S]*submitted receipt stays pending until the court owner confirms it/);
+  assert.match(index, /Receipt verification never auto-cancels a booking/);
   assert.match(index, /booking\.status = 'pending';[\s\S]*booking\.paymentStatus = 'for_verification';/);
   assert.doesNotMatch(index, /status:\s*digitalPay \? 'verifying' : 'pending'/);
   assert.doesNotMatch(index, /const status = digitalPay \? 'verifying' : 'pending'/);
-  assert.doesNotMatch(index, /Receipt auto-verified\./);
+  assert.match(index, /Receipt auto-verified\./);
 });
 
 test('payment webhooks preserve a pending owner decision', () => {
