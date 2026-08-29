@@ -716,6 +716,26 @@ tr:hover td { background: var(--bg2); }
 .booking-type-tab span { min-width:24px; padding:2px 7px; border-radius:999px; background:var(--bg2); color:var(--text3); font-size:.68rem; }
 .booking-type-tab.active { background:var(--green); color:#fff; box-shadow:0 6px 16px rgba(var(--green-rgb),.2); }
 .booking-type-tab.active span { background:rgba(255,255,255,.16); color:#fff; }
+.booking-status-tabs {
+  display:flex; gap:7px; margin:0 0 10px; overflow-x:auto; scrollbar-width:thin;
+  padding:2px 1px 4px;
+}
+.booking-status-tab {
+  display:inline-flex; align-items:center; justify-content:center; gap:7px;
+  min-height:36px; padding:7px 12px; border:1px solid var(--border); border-radius:999px;
+  background:var(--surface); color:var(--text2); font:800 .76rem 'DM Sans',sans-serif;
+  white-space:nowrap; cursor:pointer; transition:background .18s,color .18s,border-color .18s,box-shadow .18s;
+}
+.booking-status-tab span {
+  min-width:22px; padding:1px 6px; border-radius:999px; background:var(--bg2);
+  color:var(--text3); font-size:.65rem;
+}
+.booking-status-tab:hover { border-color:rgba(var(--green-rgb),.45); color:var(--green); }
+.booking-status-tab.active {
+  border-color:var(--green); background:rgba(var(--green-rgb),.12); color:var(--green);
+  box-shadow:0 4px 12px rgba(var(--green-rgb),.12);
+}
+.booking-status-tab.active span { background:var(--green); color:#fff; }
 .booking-toolbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .booking-toolbar-actions .view-toggle {
   display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border);
@@ -728,7 +748,7 @@ tr:hover td { background: var(--bg2); }
   padding: 12px; background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .booking-filter-panel .filters {
-  display: grid; grid-template-columns: minmax(220px, 1fr) 150px 150px 170px auto;
+  display: grid; grid-template-columns: minmax(220px, 1fr) 150px 170px auto;
   gap: 8px; align-items: center; width: 100%;
 }
 .booking-filter-panel .booking-search-input,
@@ -2238,6 +2258,13 @@ tr:hover td { background: var(--bg2); }
 
       <!-- LIST VIEW -->
       <div id="tableView">
+        <div class="booking-status-tabs" role="tablist" aria-label="Booking status">
+          <button type="button" role="tab" aria-selected="true" class="booking-status-tab active" data-booking-status="all" onclick="setBookingStatusGroup('all')">All <span id="bookingStatusCountAll">0</span></button>
+          <button type="button" role="tab" aria-selected="false" class="booking-status-tab" data-booking-status="pending" onclick="setBookingStatusGroup('pending')">Pending / Processing <span id="bookingStatusCountPending">0</span></button>
+          <button type="button" role="tab" aria-selected="false" class="booking-status-tab" data-booking-status="confirmed" onclick="setBookingStatusGroup('confirmed')">Confirmed <span id="bookingStatusCountConfirmed">0</span></button>
+          <button type="button" role="tab" aria-selected="false" class="booking-status-tab" data-booking-status="completed" onclick="setBookingStatusGroup('completed')">Completed <span id="bookingStatusCountCompleted">0</span></button>
+          <button type="button" role="tab" aria-selected="false" class="booking-status-tab" data-booking-status="inactive" onclick="setBookingStatusGroup('inactive')">Cancelled / Forfeited <span id="bookingStatusCountInactive">0</span></button>
+        </div>
         <div class="tbl-wrap">
           <div class="tbl-hd booking-filter-shell booking-filter-panel">
             <div class="filters">
@@ -2245,18 +2272,6 @@ tr:hover td { background: var(--bg2); }
               <label class="booking-filter-field" for="fDate">
                 <span>Date</span>
                 <input type="date" id="fDate" aria-label="Filter bookings by court date" onchange="bookingFiltersChanged()"/>
-              </label>
-              <label class="booking-filter-field" for="fStatus">
-                <span>Status</span>
-                <select id="fStatus" aria-label="Filter bookings by status" onchange="bookingFiltersChanged()">
-                  <option value="">All</option>
-                  <option value="pending">Pending</option>
-                  <option value="confirmed">Confirmed</option>
-                  <option value="completed">Completed</option>
-                  <option value="verifying">Processing</option>
-                  <option value="cancelled">Cancelled</option>
-                  <option value="forfeited">Forfeited</option>
-                </select>
               </label>
               <label class="booking-filter-field" for="fPayment">
                 <span>Payment</span>
@@ -3705,7 +3720,12 @@ function isManualImportBooking(b) {
   return ref.startsWith('MANUAL-') || method === 'manual';
 }
 function isPlaceholderHold(b) {
-  return b?.email === 'reserve@hold.internal';
+  if (b?.email === 'reserve@hold.internal') return true;
+  const name = String(b?.fullName || b?.full_name || '').trim();
+  const email = String(b?.email || '').trim();
+  const contact = String(b?.contactNumber || b?.contact_number || '').trim();
+  const expires = b?.holdExpiresAt || b?.hold_expires_at;
+  return /^Reserving(?:\u2026|\.\.\.)?$/i.test(name) && !email && !contact && Boolean(expires);
 }
 function isCancelledBooking(b) {
   return ['cancelled','forfeited'].includes(String(b?.status || '').toLowerCase());
@@ -4778,6 +4798,7 @@ async function autoCompleteBookings(bks) {
 
 let _bookingRenderSeq = 0;
 let _bookingType = 'all';
+let _bookingStatusGroup = 'all';
 let _bookingPage = 1;
 let _bookingPageSize = 50;
 let _balanceProcessorStarted = false;
@@ -4785,12 +4806,12 @@ function bookingFilters() {
   return {
     q: (($('srch') || {}).value || '').trim().toLowerCase(),
     fd: (($('fDate') || {}).value || '').trim(),
-    fs: (($('fStatus') || {}).value || '').trim(),
+    fs: _bookingStatusGroup,
     fp: (($('fPayment') || {}).value || '').trim(),
   };
 }
 function bookingFiltersActive(filters = bookingFilters()) {
-  return Boolean(filters.q || filters.fd || filters.fs || filters.fp);
+  return Boolean(filters.q || filters.fd || (filters.fs && filters.fs !== 'all') || filters.fp);
 }
 function updateBookingFilterMeta(total, shown, filters = bookingFilters()) {
   const meta = $('bookingFilterMeta');
@@ -4808,15 +4829,15 @@ function updateBookingFilterMeta(total, shown, filters = bookingFilters()) {
   const parts = [];
   if (filters.q) parts.push(`search "${filters.q}"`);
   if (filters.fd) parts.push(`date ${fmtD(filters.fd)}`);
-  if (filters.fs) parts.push(`status ${filters.fs}`);
+  if (filters.fs && filters.fs !== 'all') parts.push(`status ${bookingStatusGroupLabel(filters.fs)}`);
   if (filters.fp) parts.push(`payment ${payStatusText(filters.fp)}`);
   meta.textContent = `Showing ${shown} of ${total} booking${total === 1 ? '' : 's'} filtered by ${parts.join(', ')}`;
 }
 function resetBookingFilters({ render = true } = {}) {
   if ($('srch')) $('srch').value = '';
   if ($('fDate')) $('fDate').value = '';
-  if ($('fStatus')) $('fStatus').value = '';
   if ($('fPayment')) $('fPayment').value = '';
+  setBookingStatusGroup('all', { render: false });
   _bookingPage = 1;
   updateBookingFilterMeta(0, 0, { q: '', fd: '', fs: '', fp: '' });
   if (render) renderBookings();
@@ -4834,6 +4855,41 @@ function setBookingType(type) {
     btn.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   renderBookings();
+}
+function bookingStatusGroupLabel(group) {
+  return ({
+    all: 'all',
+    pending: 'Pending / Processing',
+    confirmed: 'Confirmed',
+    completed: 'Completed',
+    inactive: 'Cancelled / Forfeited',
+  })[group] || 'all';
+}
+function bookingMatchesStatusGroup(booking, group = _bookingStatusGroup) {
+  const status = String(booking?.status || '').toLowerCase();
+  if (group === 'pending') return status === 'pending' || status === 'verifying';
+  if (group === 'confirmed') return status === 'confirmed';
+  if (group === 'completed') return status === 'completed';
+  if (group === 'inactive') return status === 'cancelled' || status === 'forfeited';
+  return true;
+}
+function setBookingStatusGroup(group, { render = true } = {}) {
+  _bookingStatusGroup = ['all','pending','confirmed','completed','inactive'].includes(group) ? group : 'all';
+  _bookingPage = 1;
+  document.querySelectorAll('.booking-status-tab').forEach(btn => {
+    const active = btn.dataset.bookingStatus === _bookingStatusGroup;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  if (render) renderBookings();
+}
+function updateBookingStatusCounts(groups) {
+  const setCount = (id, count) => { const el = $(id); if (el) el.textContent = String(count); };
+  setCount('bookingStatusCountAll', groups.length);
+  setCount('bookingStatusCountPending', groups.filter(b => bookingMatchesStatusGroup(b, 'pending')).length);
+  setCount('bookingStatusCountConfirmed', groups.filter(b => bookingMatchesStatusGroup(b, 'confirmed')).length);
+  setCount('bookingStatusCountCompleted', groups.filter(b => bookingMatchesStatusGroup(b, 'completed')).length);
+  setCount('bookingStatusCountInactive', groups.filter(b => bookingMatchesStatusGroup(b, 'inactive')).length);
 }
 function setBookingPageSize(value) {
   _bookingPageSize = [25,50,100].includes(Number(value)) ? Number(value) : 50;
@@ -4880,10 +4936,9 @@ async function renderBookings(){
     })
     .catch(e => console.warn('autoCompleteBookings skipped:', e));
   // Hide placeholder slot-holds ("Reserving…"): these are temporary locks created
-  // when a customer clicks Book Now but hasn't submitted yet. A completed booking
-  // carries the real customer email, so any row still on reserve@hold.internal is
-  // just an in-progress or abandoned hold and adds no value to the admin list.
-  bks=bks.filter(b=>b.email!=='reserve@hold.internal');
+  // when a customer clicks Book Now but hasn't submitted yet. Current holds have
+  // no customer contact details; older deployments used reserve@hold.internal.
+  bks=bks.filter(b=>!isPlaceholderHold(b));
   const allGroups = groupBookings(bks);
   const allCount = allGroups.length;
   const hostCount = allGroups.filter(b => b.hostBooking).length;
@@ -4893,13 +4948,14 @@ async function renderBookings(){
   if ($('bookingCountHost')) $('bookingCountHost').textContent = String(hostCount);
   if (_bookingType === 'host') bks = bks.filter(b => b.hostBooking);
   else if (_bookingType === 'court') bks = bks.filter(b => !b.hostBooking);
-  const totalRawBookings = groupBookings(bks).length;
+  const statusCountGroups = groupBookings(bks);
+  updateBookingStatusCounts(statusCountGroups);
+  const totalRawBookings = statusCountGroups.length;
   const { q, fd, fs, fp } = bookingFilters();
   if(q) bks=bks.filter(b=>[b.ref,b.groupRef,b.fullName,b.email,b.courtName,b.gcashRef].some(v=>String(v||'').toLowerCase().includes(q)));
   if(fd) bks=bks.filter(b=>b.date===fd);
-  if(fs) bks=bks.filter(b=>b.status===fs);
   if(fp) bks=bks.filter(b=>b.paymentStatus===fp);
-  const filteredBookings = groupBookings(bks);
+  const filteredBookings = groupBookings(bks).filter(b => bookingMatchesStatusGroup(b, fs));
   const filteredCount = filteredBookings.length;
   updateBookingPagination(filteredCount);
   const pageStart = (_bookingPage - 1) * _bookingPageSize;
@@ -6777,8 +6833,7 @@ async function exportCSV(){
   const { q, fd, fs } = bookingFilters();
   if(q) bks=bks.filter(b=>[b.ref,b.fullName,b.email,b.courtName,b.gcashRef].some(v=>String(v||'').toLowerCase().includes(q)));
   if(fd) bks=bks.filter(b=>b.date===fd);
-  if(fs) bks=bks.filter(b=>b.status===fs);
-  bks = groupBookings(bks.filter(b=>b.email!=='reserve@hold.internal'));
+  bks = groupBookings(bks.filter(b=>!isPlaceholderHold(b))).filter(b => bookingMatchesStatusGroup(b, fs));
   const h=['Transaction Ref','Name','Email','Contact','Court(s)','Schedule','Hrs','Total','Paid Using','Money Received To','Payment Status','Booking Status','Created','Child Refs'];
   const rows=bks.map(b=>[b.displayRef||b.ref,b.fullName,b.email,b.contactNumber,b.courtName,b.scheduleLabel||`${fmtD(b.date)} ${b.startTime}-${b.endTime}`,b.duration,b.total,paymentMethodLabel(b.paymentMethod),receivedAccountLabel(b),b.paymentStatus||'unpaid',b.status,b.createdAt,(b.refs||[b.ref]).join(' ')]);
   const csv=[h,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -10760,7 +10815,7 @@ async function cleanupAbandonedHolds() {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     const all = await DB.getBookings();
     const stale = all.filter(b =>
-      b.email === 'reserve@hold.internal' &&
+      isPlaceholderHold(b) &&
       b.status === 'cancelled' &&
       b.createdAt && new Date(b.createdAt).getTime() < cutoff
     );
